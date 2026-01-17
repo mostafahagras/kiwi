@@ -4,7 +4,7 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::{CGPoint, CGSize};
 use core_graphics_types::geometry::CGRect;
-use super::ffi::*;
+use crate::ffi::*;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]

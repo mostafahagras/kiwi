@@ -1,7 +1,7 @@
 #![allow(unexpected_cfgs)]
 
 use super::list::{dict_to_window_info};
-use super::ffi::*;
+use crate::ffi::*;
 use core_foundation::base::{CFType, TCFType, CFTypeRef};
 use core_foundation::string::CFString;
 use core_foundation::array::CFArray;
@@ -37,7 +37,7 @@ pub fn get_focused_window() -> Option<super::list::WindowInfo> {
     }
 }
 
-pub(crate) unsafe fn get_focused_window_ref() -> Option<CFTypeRef> {
+pub unsafe fn get_focused_window_ref() -> Option<CFTypeRef> {
     let pid = get_frontmost_app_pid()?;
 
     let app_ref = unsafe { AXUIElementCreateApplication(pid) };
@@ -64,5 +64,23 @@ fn get_frontmost_app_pid() -> Option<i32> {
         if frontmost_app.is_null() { return None; }
         let pid: i32 = msg_send![frontmost_app, processIdentifier];
         Some(pid)
+    }
+}
+pub fn get_frontmost_app_name() -> Option<String> {
+    use objc::{msg_send, sel, sel_impl};
+    use objc::runtime::Object;
+    use core_foundation::string::{CFString, CFStringRef};
+    use core_foundation::base::{TCFType};
+
+    unsafe {
+        let workspace: *mut Object = msg_send![objc::class!(NSWorkspace), sharedWorkspace];
+        let frontmost_app: *mut Object = msg_send![workspace, frontmostApplication];
+        if frontmost_app.is_null() { return None; }
+        
+        let name_ref: CFStringRef = msg_send![frontmost_app, localizedName];
+        if name_ref.is_null() { return None; }
+        
+        let cf_string = CFString::wrap_under_get_rule(name_ref);
+        Some(cf_string.to_string())
     }
 }

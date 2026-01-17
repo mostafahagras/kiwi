@@ -1,6 +1,14 @@
 use core_foundation::base::CFTypeRef;
-use core_foundation::string::CFStringRef;
+use core_foundation::string::{CFStringRef, CFString};
 use std::os::raw::c_void;
+
+unsafe extern "C" {
+    pub static kCFBooleanTrue: CFTypeRef;
+    pub static kCFBooleanFalse: CFTypeRef;
+}
+
+pub fn k_ax_full_screen_attribute() -> CFString { CFString::from_static_string("AXFullScreen") }
+pub fn k_ax_focused_window_attribute() -> CFString { CFString::from_static_string("kAXFocusedWindow") }
 
 pub type CGWindowID = u32;
 
@@ -70,4 +78,14 @@ unsafe extern "C" {
         attribute: CFStringRef,
         value: CFTypeRef,
     ) -> AXError;
+
+    pub fn CGEventKeyboardGetUnicodeString(
+        event: CFTypeRef,
+        maxStringLength: u64,
+        actualStringLength: *mut u64,
+        unicodeString: *mut u16,
+    );
+
+    pub fn CGMainDisplayID() -> u32;
+    pub fn CGDisplayBounds(display: u32) -> core_graphics_types::geometry::CGRect;
 }
