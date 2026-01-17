@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use crate::parser::{Key, Modifiers};
 use std::hash::Hash;
+use tracing::{debug, trace};
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,6 +66,7 @@ impl HotkeyManager {
 
     pub fn process(&mut self, key: Key, modifiers: Modifiers, is_down: bool, current_app: &str) -> bool {
         let step = HotkeyStep { key, modifiers };
+        trace!("Processing hotkey: {step:?}, is_down: {is_down}, app: {current_app}");
         
         // --- RELEASE HANDLING (KeyUp) ---
         if !is_down {
@@ -76,7 +78,7 @@ impl HotkeyManager {
             // Actually, for single binds like Hyper+Esc, the path is size 1.
             // Let's iterate `active_activations` to see if we should remove one.
             
-            // For Kanata Compatibility:
+            // For Kanata, Karabiner, etc. compatibility:
             // If we receive a KeyUp that matches a valid bind, AND it wasn't tracked as active,
             // it means we missed the KeyDown. We should Execute it now.
             
@@ -92,7 +94,8 @@ impl HotkeyManager {
                             self.active_activations.remove(&seq);
                             return true; // Consume the KeyUp
                         } else {
-                            // Kanata case: KeyDown missed. Execute now!
+                            // KeyDown missed
+                            debug!("Executing on KeyUp for {step:?}");
                             handler();
                             return true;
                         }
@@ -127,6 +130,7 @@ impl HotkeyManager {
                 }
                 
                 // EXECUTE
+                debug!("Executing hotkey sequence: {:?}", self.current_path.iter().chain(std::iter::once(&step)).collect::<Vec<_>>());
                 handler();
                 
                 // Track activation
@@ -138,6 +142,7 @@ impl HotkeyManager {
                 return true;
             } else {
                 // Not a leaf, just descend
+                debug!("Entering layer: {:?}", self.current_path.iter().chain(std::iter::once(&step)).collect::<Vec<_>>());
                 self.current_path.push(step);
                 return true;
             }
@@ -154,6 +159,7 @@ impl HotkeyManager {
                     }
                     
                     // EXECUTE
+                    debug!("Executing hotkey: {step:?}");
                     handler();
 
                     // Track activation
@@ -162,6 +168,7 @@ impl HotkeyManager {
 
                     return true;
                 } else {
+                    debug!("Starting layer sequence: {step:?}");
                     self.current_path.push(step);
                     return true;
                 }

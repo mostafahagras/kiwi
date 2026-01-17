@@ -14,9 +14,11 @@ use core_graphics::event::{
 use std::path::PathBuf;
 use std::process;
 use std::sync::{Arc, Mutex};
+use crate::input::USER_DATA;
 use crate::parser::{Config, Key, Modifiers};
 use crate::ffi::{CGEventKeyboardGetUnicodeString};
 use crate::manager::RELOAD_REQUESTED;
+use tracing::{info, error, warn};
 
 fn get_character_from_event(event: &CGEvent) -> Option<char> {
     let mut actual_length = 0;
@@ -62,18 +64,25 @@ fn load_config() -> Config {
     }
 
     if !config_path.exists() {
-        eprintln!("Configuration file not found. Checked ~/.kiwi/config.toml and ./config.toml");
+        error!("Configuration file not found. Checked ~/.kiwi/config.toml and ./config.toml");
         process::exit(1);
     }
 
-    println!("Loading config from: {:?}", config_path);
+    info!("Loading config from: {config_path:?}");
     let toml_str = std::fs::read_to_string(config_path).expect("Failed to read config file");
     toml::from_str(&toml_str).expect("Failed to parse config")
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        )
+        .init();
+
     if !a11y::is_process_trusted() {
-        println!("Please grant accessibility permissions.");
+        warn!("Please grant accessibility permissions.");
         process::exit(1);
     }
 
@@ -90,7 +99,7 @@ fn main() {
         move |_proxy, type_, event| {
             // Ignore events sent by Kiwi to prevent infinite loops
             let user_data = event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA);
-            if user_data == 0x1337 {
+            if user_data == USER_DATA {
                 return CallbackResult::Keep;
             }
 
@@ -107,11 +116,11 @@ fn main() {
                 let handled = mgr.process(key, modifiers, is_down, &app_name);
 
                 if RELOAD_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
-                    println!("Reloading configuration...");
+                    info!("Reloading configuration...");
                     let new_config = load_config();
                     *mgr = manager::setup_manager(&new_config);
                     RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
-                    println!("Configuration reloaded.");
+                    info!("Configuration reloaded.");
                 }
 
                 if handled {
@@ -124,7 +133,7 @@ fn main() {
     ) {
         Ok(tap) => tap,
         Err(_) => {
-            eprintln!("Failed to create event tap. Check permissions.");
+            error!("Failed to create event tap. Check permissions.");
             process::exit(1);
         }
     };
@@ -133,7 +142,7 @@ fn main() {
     let runloop = CFRunLoop::get_current();
     runloop.add_source(&source, unsafe { kCFRunLoopCommonModes });
 
-    println!("Kiwi is running...");
+    info!("Kiwi is running...");
     tap.enable();
     CFRunLoop::run_current();
 }

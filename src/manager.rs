@@ -3,6 +3,7 @@ use std::process::Command as ShellCommand;
 use crate::parser::{Config, KeyCombination, Layer, Command, SnapSide, LayerItem};
 use crate::hotkey::{HotkeyManager, HotkeyStep};
 use crate::window;
+use tracing::{debug, error};
 
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +18,7 @@ fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
 pub static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub fn launch_app(name: &str) {
+    debug!("Launching app: {name}");
     ShellCommand::new("open").arg("-a").arg(name).spawn().ok();
 }
 
@@ -115,6 +117,7 @@ pub fn snap_window(side: SnapSide) {
     }
 
     if window::set_focused_window_bounds(x, y, w, h) {
+        debug!("Snapped window to {side:?}");
     }
 }
 
@@ -128,7 +131,7 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
                 register_command(&mut manager, vec![HotkeyStep::new(combo.key, combo.modifiers)], None, cmd.clone(), config);
             }
             Err(e) => {
-                eprintln!("Failed to parse bind '{}': {}", key_str, e);
+                error!("Failed to parse bind '{key_str}': {e}");
             }
         }
     }
@@ -141,7 +144,7 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
                     register_layer(&mut manager, vec![HotkeyStep::new(combo.key, combo.modifiers)], None, layer.clone(), config);
                 }
                 Err(e) => {
-                    eprintln!("Failed to parse layer activation '{}': {}", activate_str, e);
+                    error!("Failed to parse layer activation '{activate_str}': {e}");
                 }
             }
         }
@@ -210,17 +213,20 @@ pub fn register_command(manager: &mut HotkeyManager, sequence: Vec<HotkeyStep>, 
             // Parse the keys to send (e.g. "Ctrl+T")
             if let Ok(combo) = KeyCombination::from_str_with_context(&keys, &config.modifiers) {
                 manager.bind(sequence, context, move || {
+                    debug!("Remapping to: {combo:?}");
                     crate::input::send_key_combination(&combo);
                 });
             }
         }
         Command::Shell(cmd) => {
             manager.bind(sequence, context, move || {
+                debug!("Executing shell command: {cmd}");
                 ShellCommand::new("sh").arg("-c").arg(&cmd).spawn().ok();
             });
         }
         Command::Reload => {
             manager.bind(sequence, context, || {
+                debug!("Reload requested");
                 RELOAD_REQUESTED.store(true, Ordering::SeqCst);
             });
         }

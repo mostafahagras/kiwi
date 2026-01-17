@@ -6,6 +6,8 @@ use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::event::CGEventTapLocation;
 use crate::parser::{Key, KeyCombination};
 
+pub const USER_DATA: i64 = 0x6B697769; // "kiwi" in hexadecimal
+
 struct SyncEventSource(CGEventSource);
 unsafe impl Send for SyncEventSource {}
 unsafe impl Sync for SyncEventSource {}
@@ -32,7 +34,7 @@ pub fn send_key_combination(combo: &KeyCombination) {
     // Key Down
     if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), keycode, true) {
         event.set_flags(flags);
-        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, 0x1337);
+        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 
@@ -42,7 +44,7 @@ pub fn send_key_combination(combo: &KeyCombination) {
     // Key Up
     if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), keycode, false) {
         event.set_flags(flags);
-        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, 0x1337);
+        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 }
@@ -52,7 +54,7 @@ pub fn click(point: CGPoint) {
     
     // Mouse Down
     if let Ok(event) = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left) {
-        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, 0x1337);
+        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 
@@ -60,7 +62,7 @@ pub fn click(point: CGPoint) {
 
     // Mouse Up
     if let Ok(event) = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, point, CGMouseButton::Left) {
-        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, 0x1337);
+        event.set_integer_value_field(core_graphics::event::EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 }

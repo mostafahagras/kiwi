@@ -15,6 +15,8 @@ core-graphics-types = "0.2.0"
 objc = "0.2.7"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.11"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [lints.rust]
 unexpected_cfgs = "allow"
