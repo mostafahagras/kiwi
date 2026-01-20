@@ -1,0 +1,41 @@
+[modifiers] # modifier aliases
+hyper = ["command", "option", "shift", "control"]
+
+[binds] # global keybinds
+"hyper+esc" = "sleep 0.25; pmset displaysleepnow" # shell commands
+
+[apps] # app name aliases
+chrome = "Google Chrome"
+
+[layer.launch] # layers
+activate = "hyper+l" # layer activation
+s = "open:Safari" # open apps
+f = "open:Finder"
+g = "open:Ghostty"
+x = "open:Xcode"
+c = "open:Google Chrome"
+t = "open:Terminal"
+
+[layer.snap]
+activate = "hyper+s"
+j = "snap:left"
+k = "snap:maximize"
+l = "snap:right"
+r = "snap:restore"
+
+[layer.snap.top] # nested layers
+activate = "t"
+j = "snap:topleft"
+l = "snap:topright"
+
+[layer.snap.bottom]
+activate = "b"
+j = "snap:bottomleft"
+l = "snap:bottomright"
+
+[layer.kiwi]
+activate = "hyper+i"
+r = "reload" # reload config
+
+[app.chrome] # per app keybinds
+"hyper+t" = "remap:command+t" # remapping keys

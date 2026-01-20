@@ -2,6 +2,9 @@
 
 Kiwi is a minimalistic, keyboard-driven hotkey daemon for macOS. It allows you to manage windows, launch apps, and execute system commands with configurable keybindings.
 
+> [!NOTE]
+> Docs coming soon...
+
 ## Commands
 
 ### 1. Open Application (`open:`)
@@ -62,7 +65,7 @@ Reloads the `config.toml` file without restarting Kiwi.
 
 ## Configuration Structure
 
-Define your bindings in `config.toml`:
+Define your bindings in `~/.kiwi/config.toml`:
 
 ```toml
 [binds]
