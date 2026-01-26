@@ -3,7 +3,7 @@ use std::process::Command as ShellCommand;
 use crate::parser::{Config, KeyCombination, Layer, Command, SnapSide, LayerItem};
 use crate::hotkey::{HotkeyManager, HotkeyStep};
 use crate::window;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +18,7 @@ fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
 pub static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub fn launch_app(name: &str) {
-    debug!("Launching app: {name}");
+    info!("Launching app: {name}");
     ShellCommand::new("open").arg("-a").arg(name).spawn().ok();
 }
 
@@ -117,7 +117,7 @@ pub fn snap_window(side: SnapSide) {
     }
 
     if window::set_focused_window_bounds(x, y, w, h) {
-        debug!("Snapped window to {side:?}");
+        info!("Snapped window to {side:?}");
     }
 }
 
@@ -213,20 +213,20 @@ pub fn register_command(manager: &mut HotkeyManager, sequence: Vec<HotkeyStep>, 
             // Parse the keys to send (e.g. "Ctrl+T")
             if let Ok(combo) = KeyCombination::from_str_with_context(&keys, &config.modifiers) {
                 manager.bind(sequence, context, move || {
-                    debug!("Remapping to: {combo:?}");
+                    info!("Remapping to: {combo:?}");
                     crate::input::send_key_combination(&combo);
                 });
             }
         }
         Command::Shell(cmd) => {
             manager.bind(sequence, context, move || {
-                debug!("Executing shell command: {cmd}");
+                info!("Executing shell command: {cmd}");
                 ShellCommand::new("sh").arg("-c").arg(&cmd).spawn().ok();
             });
         }
         Command::Reload => {
             manager.bind(sequence, context, || {
-                debug!("Reload requested");
+                info!("Reload requested");
                 RELOAD_REQUESTED.store(true, Ordering::SeqCst);
             });
         }

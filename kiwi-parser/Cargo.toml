@@ -1,0 +1,15 @@
+[package]
+name = "kiwi-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitflags = { version = "2.10.0", features = ["serde"] }
+core-foundation = "0.10.1"
+miette = { version = "7.6.0", features = ["fancy"] }
+serde = { version = "1.0.228", features = ["derive"] }
+strsim = "0.11.1"
+thiserror = "2.0.18"
+toml = "0.9.11"
+toml-span = { version = "0.6.0", features = ["serde"] }
+toml_edit = "0.24.0"

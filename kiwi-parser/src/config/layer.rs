@@ -1,0 +1,184 @@
+use crate::{
+    config::{
+        ValidationContext,
+        action::{Action, parse_action},
+        binding::parse_keybinding,
+        error::ConfigError,
+        utils::is_similar,
+    },
+    key::KeyBinding,
+};
+use miette::SourceSpan;
+use std::collections::HashMap;
+
+#[derive(Debug)]
+pub struct Layer {
+    pub name: String,
+    pub mode: Option<String>,
+    pub timeout: Option<u32>,
+    pub binds: HashMap<KeyBinding, Action>,
+    pub children: HashMap<KeyBinding, Layer>,
+}
+
+pub fn parse_layers(
+    table: &toml_span::value::Table,
+    errors: &mut Vec<ConfigError>,
+    ctx: &ValidationContext,
+) -> HashMap<KeyBinding, Layer> {
+    let reserved = ["activate", "timeout", "mode"];
+    let mut layers: HashMap<KeyBinding, Layer> = HashMap::new();
+
+    for (key, val) in table {
+        let key_str = key.to_string();
+        let key_span = SourceSpan::new(
+            key.span.start.into(),
+            (key.span.end - key.span.start).into(),
+        );
+
+        if let Some(inner_table) = val.as_table() {
+            let mut layer_binds = HashMap::new();
+            let mut activate_trigger = None;
+            let mut timeout_ms = None;
+            let mut layer_mode = None;
+
+            // 1. Requirement check: Nested tables must have 'activate'
+            if !inner_table.contains_key("activate") {
+                errors.push(ConfigError::MissingField {
+                    src: ctx.src.clone(),
+                    field: "activate".into(),
+                    table_type: format!("layer '{}'", key_str),
+                    span: key_span,
+                });
+            }
+
+            // 2. Process the table contents
+            for (i_key, i_val) in inner_table {
+                let i_key_str = i_key.to_string();
+                let i_key_span = SourceSpan::new(
+                    i_key.span.start.into(),
+                    (i_key.span.end - i_key.span.start).into(),
+                );
+
+                if i_val.as_table().is_some() {
+                    continue;
+                }
+
+                match i_key_str.as_str() {
+                    "activate" => {
+                        if let Some(raw_s) = i_val.as_str() {
+                            activate_trigger = parse_keybinding(raw_s, i_key_span, errors, ctx);
+                        }
+                    }
+                    "timeout" => {
+                        timeout_ms = parse_timeout_field(i_val, errors, ctx);
+                    }
+                    "mode" => {
+                        layer_mode = i_val.as_str().map(|s| s.to_string());
+                    }
+                    _ => {
+                        // Check for typos of reserved words (e.g., "activte")
+                        for target in reserved {
+                            if is_similar(&i_key_str, target) {
+                                errors.push(ConfigError::UnknownField {
+                                    src: ctx.src.clone(),
+                                    found: i_key_str.clone(),
+                                    span: i_key_span,
+                                    help: format!("Did you mean '{}'?", target),
+                                });
+                            }
+                        }
+
+                        // It's a binding. Try to parse both sides.
+                        if let Some(trigger) = parse_keybinding(&i_key_str, i_key_span, errors, ctx)
+                        {
+                            if let Some(action) = parse_action(i_val, errors, ctx) {
+                                layer_binds.insert(trigger, action);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Handle Nested Layers (Recursion)
+            // We search the inner table for any values that are themselves tables
+            // let children = parse_layers(inner_table, errors, ctx);
+            // if let Some(activate_trigger) = activate_trigger {
+            //     layers.insert(activate_trigger, Layer {
+            //         name: key_str,
+            //         // activate: activate_trigger,
+            //         mode: layer_mode,
+            //         timeout: timeout_ms,
+            //         binds: layer_binds,
+            //         children,
+            //     });
+            // }
+            // 3. Handle Nested Layers (Recursion)
+            let children = parse_layers(inner_table, errors, ctx);
+
+            if let Some(trigger) = activate_trigger {
+                // --- DUPLICATE CHECK START ---
+                if let Some(existing_layer) = layers.get(&trigger) {
+                    errors.push(ConfigError::InvalidBinding {
+                        src: ctx.src.clone(),
+                        raw: format!("{:?}", trigger),
+                        span: key_span, // The span of the layer name 'key_str'
+                        message: format!(
+                            "Layer activation conflict: '{:?}' is already used by layer '{}'.",
+                            trigger, existing_layer.name
+                        ),
+                    });
+                    // We continue because we don't want to overwrite the existing layer
+                    continue;
+                }
+                // --- DUPLICATE CHECK END ---
+
+                layers.insert(
+                    trigger,
+                    Layer {
+                        name: key_str,
+                        mode: layer_mode,
+                        timeout: timeout_ms,
+                        binds: layer_binds,
+                        children,
+                    },
+                );
+            }
+            // 4. Construct the Layer object
+        }
+    }
+    layers
+}
+
+fn parse_timeout_field(
+    val: &toml_span::Value,
+    errors: &mut Vec<ConfigError>,
+    ctx: &ValidationContext,
+) -> Option<u32> {
+    let span = SourceSpan::new(
+        val.span.start.into(),
+        (val.span.end - val.span.start).into(),
+    );
+
+    if let Some(int_val) = val.as_integer() {
+        if int_val >= 0 {
+            return Some(int_val as u32);
+        } else {
+            errors.push(ConfigError::InvalidTimeout {
+                src: ctx.src.clone(),
+                span,
+            });
+        }
+    } else if let Some(s_val) = val.as_str() {
+        if let Ok(parsed) = s_val.parse::<u32>() {
+            errors.push(ConfigError::TimeoutCoercion {
+                src: ctx.src.clone(),
+                span,
+                val: s_val.to_string(),
+                parsed: parsed as i64,
+                help: format!("Consider changing to: timeout = {}", parsed),
+            });
+            return Some(parsed);
+        }
+    }
+    None
+}
