@@ -1,14 +1,19 @@
-use core_foundation::base::CFTypeRef;
-use core_foundation::string::{CFStringRef, CFString};
-use std::os::raw::c_void;
+use core_foundation::base::{CFTypeRef, UInt32};
+use core_foundation::string::{CFString, CFStringRef};
+use core_graphics::event::CGKeyCode;
+use std::os::raw::{c_uint, c_void};
 
 unsafe extern "C" {
     pub static kCFBooleanTrue: CFTypeRef;
     pub static kCFBooleanFalse: CFTypeRef;
 }
 
-pub fn k_ax_full_screen_attribute() -> CFString { CFString::from_static_string("AXFullScreen") }
-pub fn k_ax_focused_window_attribute() -> CFString { CFString::from_static_string("kAXFocusedWindow") }
+pub fn k_ax_full_screen_attribute() -> CFString {
+    CFString::from_static_string("AXFullScreen")
+}
+pub fn k_ax_focused_window_attribute() -> CFString {
+    CFString::from_static_string("kAXFocusedWindow")
+}
 
 pub type CGWindowID = u32;
 
@@ -89,3 +94,52 @@ unsafe extern "C" {
     pub fn CGMainDisplayID() -> u32;
     pub fn CGDisplayBounds(display: u32) -> core_graphics_types::geometry::CGRect;
 }
+
+#[repr(C)]
+pub struct UCKeyboardLayout {
+    _unused: [u8; 0],
+}
+
+#[link(name = "Carbon", kind = "framework")]
+unsafe extern "C" {
+    pub unsafe fn TISCopyCurrentKeyboardLayoutInputSource() -> CFTypeRef;
+    pub fn LMGetKbdType() -> u32;
+    pub unsafe fn TISGetInputSourceProperty(
+        input_source: CFTypeRef,
+        property_key: CFStringRef,
+    ) -> CFTypeRef;
+
+    pub fn UCKeyTranslate(
+        layout: *const UCKeyboardLayout,
+        virtual_key_code: CGKeyCode,
+        key_action: c_uint,
+        modifier_key_state: UInt32,
+        keyboard_type: UInt32,
+        key_translate_options: UInt32,
+        dead_key_state: *mut UInt32,
+        max_string_length: c_uint,
+        actual_string_length: *mut c_uint,
+        unicode_string: *mut u16,
+    ) -> i32;
+}
+
+#[link(name = "Carbon", kind = "framework")]
+unsafe extern "C" {
+    pub fn TISCopyCurrentKeyboardInputSource() -> *mut c_void;
+    pub static kTISPropertyInputSourceID: *const c_void;
+    pub static kTISNotifySelectedKeyboardInputSourceChanged: CFStringRef;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    pub fn CFNotificationCenterGetDistributedCenter() -> *mut c_void;
+    pub fn CFNotificationCenterAddObserver(
+        center: *mut c_void,
+        observer: *const c_void,
+        callback: extern "C" fn(*mut c_void, *mut c_void, CFStringRef, *const c_void, *mut c_void),
+        name: CFStringRef,
+        object: *const c_void,
+        suspension_behavior: isize,
+    );
+}
+

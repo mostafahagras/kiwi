@@ -105,27 +105,27 @@ pub fn cf_dictionary_to_rect(cf: &CFType) -> Option<CGRect> {
     }
 }
 
-pub fn get_windows() -> Vec<WindowInfo> {
-    unsafe {
-        let options = CGWindowListOption::OPTION_ON_SCREEN_ONLY
-            | CGWindowListOption::EXCLUDE_DESKTOP_ELEMENTS;
-        let array_ref = CGWindowListCopyWindowInfo(options, 0);
-        if array_ref.is_null() {
-            return vec![];
-        }
+// pub fn get_windows() -> Vec<WindowInfo> {
+//     unsafe {
+//         let options = CGWindowListOption::OPTION_ON_SCREEN_ONLY
+//             | CGWindowListOption::EXCLUDE_DESKTOP_ELEMENTS;
+//         let array_ref = CGWindowListCopyWindowInfo(options, 0);
+//         if array_ref.is_null() {
+//             return vec![];
+//         }
 
-        let array: core_foundation::array::CFArray<CFDictionary<CFString, CFType>> = core_foundation::array::CFArray::wrap_under_create_rule(array_ref as *mut _);
-        let mut windows = Vec::new();
+//         let array: core_foundation::array::CFArray<CFDictionary<CFString, CFType>> = core_foundation::array::CFArray::wrap_under_create_rule(array_ref as *mut _);
+//         let mut windows = Vec::new();
 
-        for i in 0..array.len() {
-            if let Some(dict_ref) = array.get(i) {
-                if let Some(win) = dict_to_window_info(&dict_ref) {
-                    if win.layer == 0 {
-                        windows.push(win);
-                    }
-                }
-            }
-        }
-        windows
-    }
-}
+//         for i in 0..array.len() {
+//             if let Some(dict_ref) = array.get(i) {
+//                 if let Some(win) = dict_to_window_info(&dict_ref) {
+//                     if win.layer == 0 {
+//                         windows.push(win);
+//                     }
+//                 }
+//             }
+//         }
+//         windows
+//     }
+// }

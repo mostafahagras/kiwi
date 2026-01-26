@@ -1,24 +1,24 @@
-pub mod ffi;
-pub mod window;
-pub mod parser;
-pub mod hotkey;
-pub mod manager;
 pub mod a11y;
+pub mod ffi;
+pub mod hotkey;
 pub mod input;
+pub mod manager;
+pub mod parser;
+pub mod window;
 
+use crate::ffi::CGEventKeyboardGetUnicodeString;
+use crate::input::USER_DATA;
+use crate::manager::RELOAD_REQUESTED;
+use crate::parser::{Config, Key, Modifiers};
 use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes};
 use core_graphics::event::{
-    CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventType, CallbackResult, EventField,
+    CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
+    CallbackResult, EventField,
 };
 use std::path::PathBuf;
 use std::process;
 use std::sync::{Arc, Mutex};
-use crate::input::USER_DATA;
-use crate::parser::{Config, Key, Modifiers};
-use crate::ffi::{CGEventKeyboardGetUnicodeString};
-use crate::manager::RELOAD_REQUESTED;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 
 fn get_character_from_event(event: &CGEvent) -> Option<char> {
     let mut actual_length = 0;
@@ -44,7 +44,7 @@ fn get_character_from_event(event: &CGEvent) -> Option<char> {
 
 fn load_config() -> Config {
     let mut config_path = PathBuf::new();
-    
+
     // Check ~/.kiwi/config.toml
     if let Ok(home) = std::env::var("HOME") {
         let mut p = PathBuf::from(home);
@@ -77,7 +77,7 @@ fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 
@@ -138,7 +138,10 @@ fn main() {
         }
     };
 
-    let source = tap.mach_port().create_runloop_source(0).expect("Failed to create source");
+    let source = tap
+        .mach_port()
+        .create_runloop_source(0)
+        .expect("Failed to create source");
     let runloop = CFRunLoop::get_current();
     runloop.add_source(&source, unsafe { kCFRunLoopCommonModes });
 

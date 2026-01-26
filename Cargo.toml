@@ -2,6 +2,8 @@
 name = "kiwie"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/mostafahagras/kiwi"
+readme = "README.md"
 
 [[bin]]
 name = "kiwi"
