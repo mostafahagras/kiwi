@@ -71,6 +71,7 @@ fn main() {
     }
     thread::spawn(init_focus_observer);
     let config = load_config();
+    manager::init_action_executor();
     if let Some(layout_id) = &config.layout {
         println!("Setting layout to: {layout_id}");
         translate::set_layout(layout_id);
@@ -104,7 +105,11 @@ fn main() {
             let app_name = crate::window::get_focused_app();
 
             if let Ok(mut mgr) = manager_ref.lock() {
-                let handled = mgr.process(key, modifiers, is_down, &app_name);
+                let result = mgr.process(key, modifiers, is_down, &app_name);
+                let handled = result.handled;
+                if let Some(action) = result.action {
+                    manager::dispatch_action(action);
+                }
 
                 if RELOAD_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
                     info!("Reloading configuration...");

@@ -3,6 +3,7 @@ use crate::window;
 use kiwi_parser::{Action, Config, Layer, Resize, Snap};
 use std::collections::{HashMap, HashSet};
 use std::process::Command as ShellCommand;
+use std::sync::mpsc::{self, Sender};
 use tracing::{debug, error, info};
 
 use core_graphics_types::geometry::CGRect;
@@ -11,12 +12,42 @@ use std::sync::{Mutex, OnceLock};
 
 static WINDOW_STATE: OnceLock<Mutex<HashMap<u32, CGRect>>> = OnceLock::new();
 const WINDOW_STATE_MAX_ENTRIES: usize = 256;
+static ACTION_SENDER: OnceLock<Sender<Action>> = OnceLock::new();
 
 fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
     WINDOW_STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+pub fn init_action_executor() {
+    if ACTION_SENDER.get().is_some() {
+        return;
+    }
+
+    let (tx, rx) = mpsc::channel::<Action>();
+    std::thread::Builder::new()
+        .name("kiwi-action-executor".into())
+        .spawn(move || {
+            while let Ok(action) = rx.recv() {
+                handle_action(&action);
+            }
+        })
+        .expect("failed to start action executor");
+
+    let _ = ACTION_SENDER.set(tx);
+}
+
+pub fn dispatch_action(action: Action) {
+    if let Some(tx) = ACTION_SENDER.get() {
+        if let Err(e) = tx.send(action) {
+            error!("Failed to enqueue action: {}", e);
+        }
+    } else {
+        // Fallback for safety if called before executor initialization.
+        handle_action(&action);
+    }
+}
 
 pub fn clear_window_state() {
     if let Ok(mut state) = get_window_state().lock() {
@@ -57,7 +88,7 @@ pub fn handle_action(action: &Action) {
             if let Some(app_name) = cmd.strip_prefix("open -a ") {
                 launch_app(app_name.trim());
             } else {
-                ShellCommand::new("sh").arg("-c").arg(&cmd).spawn().ok();
+                ShellCommand::new("sh").arg("-c").arg(cmd).spawn().ok();
             }
         }
         Action::Remap(binding) => {
@@ -380,11 +411,10 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
 
     // 1. Global binds
     for (binding, action) in &config.global_binds {
-        let action = action.clone();
         manager.bind(
             vec![HotkeyStep::new(binding.key.clone(), binding.modifiers)],
             None,
-            move || handle_action(&action),
+            action.clone(),
         );
     }
 
@@ -402,11 +432,10 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
     for (app_name, app_config) in &config.apps {
         // App binds
         for (binding, action) in &app_config.binds {
-            let action = action.clone();
             manager.bind(
                 vec![HotkeyStep::new(binding.key.clone(), binding.modifiers)],
                 Some(app_name.clone()),
-                move || handle_action(&action),
+                action.clone(),
             );
         }
         // App layers
@@ -433,8 +462,7 @@ fn register_layer(
     for (binding, action) in &layer.binds {
         let mut sequence = prefix.clone();
         sequence.push(HotkeyStep::new(binding.key.clone(), binding.modifiers));
-        let action = action.clone();
-        manager.bind(sequence, context.clone(), move || handle_action(&action));
+        manager.bind(sequence, context.clone(), action.clone());
     }
     // Nested layers
     for (trigger, child_layer) in &layer.children {
