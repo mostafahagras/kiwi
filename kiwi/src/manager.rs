@@ -1,4 +1,4 @@
-use crate::hotkey::{HotkeyManager, HotkeyStep};
+use crate::hotkey::{HotkeyManager, HotkeyStep, LayerBehavior};
 use crate::window;
 use kiwi_parser::{Action, Config, Key, KeyBinding, Layer, Modifiers, Resize, Snap};
 use std::collections::{HashMap, HashSet};
@@ -493,12 +493,7 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
 
     // 2. Layers
     for (trigger, layer) in &config.layers {
-        register_layer(
-            &mut manager,
-            vec![HotkeyStep::new(trigger.key.clone(), trigger.modifiers)],
-            None,
-            layer,
-        );
+        register_layer(&mut manager, Vec::new(), None, trigger, layer);
     }
 
     // 3. Apps
@@ -515,8 +510,9 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
         for (trigger, layer) in &app_config.children {
             register_layer(
                 &mut manager,
-                vec![HotkeyStep::new(trigger.key.clone(), trigger.modifiers)],
+                Vec::new(),
                 Some(app_name.clone()),
+                trigger,
                 layer,
             );
         }
@@ -529,19 +525,38 @@ fn register_layer(
     manager: &mut HotkeyManager,
     prefix: Vec<HotkeyStep>,
     context: Option<String>,
+    trigger: &KeyBinding,
     layer: &Layer,
 ) {
+    let mut layer_prefix = prefix;
+    layer_prefix.push(HotkeyStep::new(trigger.key.clone(), trigger.modifiers));
+
+    let behavior = LayerBehavior {
+        mode: layer.mode,
+        timeout_ms: layer.timeout,
+        deactivate: layer
+            .deactivate
+            .as_ref()
+            .map(|k| HotkeyStep::new(k.key.clone(), k.modifiers)),
+    };
+    manager.register_layer(layer_prefix.clone(), context.clone(), behavior);
+
     // Layer binds
     for (binding, action) in &layer.binds {
-        let mut sequence = prefix.clone();
+        let mut sequence = layer_prefix.clone();
         sequence.push(HotkeyStep::new(binding.key.clone(), binding.modifiers));
         manager.bind(sequence, context.clone(), action.clone());
     }
+
     // Nested layers
     for (trigger, child_layer) in &layer.children {
-        let mut next_prefix = prefix.clone();
-        next_prefix.push(HotkeyStep::new(trigger.key.clone(), trigger.modifiers));
-        register_layer(manager, next_prefix, context.clone(), child_layer);
+        register_layer(
+            manager,
+            layer_prefix.clone(),
+            context.clone(),
+            trigger,
+            child_layer,
+        );
     }
 }
 

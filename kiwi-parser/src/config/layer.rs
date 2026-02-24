@@ -14,10 +14,27 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub struct Layer {
     pub name: String,
-    pub mode: Option<String>,
+    pub mode: LayerMode,
     pub timeout: Option<u32>,
+    pub deactivate: Option<KeyBinding>,
     pub binds: HashMap<KeyBinding, Action>,
     pub children: HashMap<KeyBinding, Layer>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerMode {
+    Oneshot,
+    Sticky,
+}
+
+impl LayerMode {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "oneshot" => Some(Self::Oneshot),
+            "sticky" => Some(Self::Sticky),
+            _ => None,
+        }
+    }
 }
 
 pub fn parse_layers(
@@ -25,7 +42,7 @@ pub fn parse_layers(
     errors: &mut Vec<ConfigError>,
     ctx: &ValidationContext,
 ) -> HashMap<KeyBinding, Layer> {
-    let reserved = ["activate", "timeout", "mode"];
+    let reserved = ["activate", "timeout", "mode", "deactivate"];
     let mut layers: HashMap<KeyBinding, Layer> = HashMap::new();
 
     for (key, val) in table {
@@ -39,7 +56,8 @@ pub fn parse_layers(
             let mut layer_binds = HashMap::new();
             let mut activate_trigger = None;
             let mut timeout_ms = None;
-            let mut layer_mode = None;
+            let mut layer_mode = LayerMode::Oneshot;
+            let mut deactivate_trigger = None;
 
             // 1. Requirement check: Nested tables must have 'activate'
             if !inner_table.contains_key("activate") {
@@ -73,7 +91,38 @@ pub fn parse_layers(
                         timeout_ms = parse_timeout_field(i_val, errors, ctx);
                     }
                     "mode" => {
-                        layer_mode = i_val.as_str().map(|s| s.to_string());
+                        if let Some(raw_mode) = i_val.as_str() {
+                            if let Some(parsed_mode) = LayerMode::parse(raw_mode) {
+                                layer_mode = parsed_mode;
+                            } else {
+                                errors.push(ConfigError::InvalidBinding {
+                                    src: ctx.src.clone(),
+                                    raw: raw_mode.to_string(),
+                                    span: i_key_span,
+                                    message: "Invalid layer mode. Valid values: oneshot, sticky"
+                                        .into(),
+                                });
+                            }
+                        } else {
+                            errors.push(ConfigError::InvalidBinding {
+                                src: ctx.src.clone(),
+                                raw: i_key_str.clone(),
+                                span: i_key_span,
+                                message: "Layer mode must be a string".into(),
+                            });
+                        }
+                    }
+                    "deactivate" => {
+                        if let Some(raw_s) = i_val.as_str() {
+                            deactivate_trigger = parse_keybinding(raw_s, i_key_span, errors, ctx);
+                        } else {
+                            errors.push(ConfigError::InvalidBinding {
+                                src: ctx.src.clone(),
+                                raw: i_key_str.clone(),
+                                span: i_key_span,
+                                message: "deactivate must be a keybinding string".into(),
+                            });
+                        }
                     }
                     _ => {
                         // Check for typos of reserved words (e.g., "activte")
@@ -138,6 +187,7 @@ pub fn parse_layers(
                         name: key_str,
                         mode: layer_mode,
                         timeout: timeout_ms,
+                        deactivate: deactivate_trigger,
                         binds: layer_binds,
                         children,
                     },

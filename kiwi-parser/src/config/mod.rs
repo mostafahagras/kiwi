@@ -252,3 +252,56 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 
     Ok(config)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_config;
+    use crate::config::layer::LayerMode;
+    use std::path::PathBuf;
+
+    #[test]
+    fn layer_mode_defaults_to_oneshot_and_parses_deactivate() {
+        let raw = r#"
+[layer.main]
+activate = "cmd+k"
+deactivate = "esc"
+"x" = "reload"
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let (_, layer) = config.layers.iter().next().expect("expected one layer");
+
+        assert_eq!(layer.mode, LayerMode::Oneshot);
+        assert!(layer.deactivate.is_some());
+    }
+
+    #[test]
+    fn layer_mode_sticky_and_timeout_zero_parse() {
+        let raw = r#"
+[layer.main]
+activate = "cmd+k"
+mode = "sticky"
+timeout = 0
+"x" = "reload"
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let (_, layer) = config.layers.iter().next().expect("expected one layer");
+
+        assert_eq!(layer.mode, LayerMode::Sticky);
+        assert_eq!(layer.timeout, Some(0));
+    }
+
+    #[test]
+    fn invalid_layer_mode_is_rejected() {
+        let raw = r#"
+[layer.main]
+activate = "cmd+k"
+mode = "invalid"
+"x" = "reload"
+"#;
+
+        let err = parse_config(raw, PathBuf::from("test.toml"));
+        assert!(err.is_err());
+    }
+}

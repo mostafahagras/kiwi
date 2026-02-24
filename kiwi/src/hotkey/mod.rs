@@ -1,6 +1,7 @@
-use kiwi_parser::{Action, Key, Modifiers};
+use kiwi_parser::{Action, Key, LayerMode, Modifiers};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::time::{Duration, Instant};
 use tracing::{debug, trace};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,9 +33,17 @@ impl HotkeyStep {
 }
 
 #[derive(Clone)]
+pub struct LayerBehavior {
+    pub mode: LayerMode,
+    pub timeout_ms: Option<u32>,
+    pub deactivate: Option<HotkeyStep>,
+}
+
+#[derive(Clone)]
 pub struct HotkeyNode {
     pub action: Option<Action>,
-    pub context: Option<String>, // New field for app context
+    pub context: Option<String>,
+    pub layer_behavior: Option<LayerBehavior>,
     pub children: HashMap<HotkeyStep, HotkeyNode>,
 }
 
@@ -43,6 +52,7 @@ impl HotkeyNode {
         Self {
             action: None,
             context: None,
+            layer_behavior: None,
             children: HashMap::new(),
         }
     }
@@ -55,10 +65,24 @@ impl Default for HotkeyNode {
 }
 
 #[derive(Clone)]
+struct ActiveLayer {
+    path: Vec<HotkeyStep>,
+    behavior: LayerBehavior,
+    deadline: Option<Instant>,
+}
+
+struct LookupHit {
+    full_path: Vec<HotkeyStep>,
+    action: Option<Action>,
+    layer_behavior: Option<LayerBehavior>,
+}
+
+#[derive(Clone)]
 pub struct HotkeyManager {
     root: HotkeyNode,
-    current_path: Vec<HotkeyStep>,
-    active_activations: HashSet<Vec<HotkeyStep>>,
+    active_layers: Vec<ActiveLayer>,
+    active_activations: HashSet<HotkeyStep>,
+    pending_deactivate_release: Option<HotkeyStep>,
 }
 
 pub struct ProcessResult {
@@ -86,8 +110,9 @@ impl HotkeyManager {
     pub fn new() -> Self {
         Self {
             root: HotkeyNode::new(),
-            current_path: Vec::new(),
+            active_layers: Vec::new(),
             active_activations: HashSet::new(),
+            pending_deactivate_release: None,
         }
     }
 
@@ -100,6 +125,74 @@ impl HotkeyManager {
         node.context = context;
     }
 
+    pub fn register_layer(
+        &mut self,
+        sequence: Vec<HotkeyStep>,
+        context: Option<String>,
+        behavior: LayerBehavior,
+    ) {
+        let mut node = &mut self.root;
+        for step in sequence {
+            node = node.children.entry(step).or_default();
+        }
+        node.context = context;
+        node.layer_behavior = Some(behavior);
+    }
+
+    fn node_for_path(&self, path: &[HotkeyStep]) -> Option<&HotkeyNode> {
+        let mut node = &self.root;
+        for step in path {
+            node = node.children.get(step)?;
+        }
+        Some(node)
+    }
+
+    fn lookup_in_scope(&self, path: &[HotkeyStep], step: &HotkeyStep, current_app: &str) -> Option<LookupHit> {
+        let scope = self.node_for_path(path)?;
+        let node = scope.children.get(step)?;
+
+        if let Some(ctx) = &node.context
+            && ctx != current_app
+        {
+            return None;
+        }
+
+        let mut full_path = path.to_vec();
+        full_path.push(step.clone());
+
+        Some(LookupHit {
+            full_path,
+            action: node.action.clone(),
+            layer_behavior: node.layer_behavior.clone(),
+        })
+    }
+
+    fn deadline_from_timeout(timeout_ms: Option<u32>) -> Option<Instant> {
+        match timeout_ms {
+            Some(ms) if ms > 0 => Some(Instant::now() + Duration::from_millis(ms as u64)),
+            _ => None,
+        }
+    }
+
+    fn pop_expired_layers(&mut self) {
+        let now = Instant::now();
+        while let Some(top) = self.active_layers.last() {
+            let Some(deadline) = top.deadline else {
+                break;
+            };
+            if now < deadline {
+                break;
+            }
+            self.active_layers.pop();
+        }
+    }
+
+    fn reset_top_deadline(&mut self) {
+        if let Some(top) = self.active_layers.last_mut() {
+            top.deadline = Self::deadline_from_timeout(top.behavior.timeout_ms);
+        }
+    }
+
     pub fn process(
         &mut self,
         key: Key,
@@ -110,116 +203,252 @@ impl HotkeyManager {
         let step = HotkeyStep { key, modifiers };
         trace!("[{current_app}] {} {step}", if is_down { "↓" } else { "↑" });
 
-        // --- RELEASE HANDLING (KeyUp) ---
         if !is_down {
-            // If we receive a KeyUp that matches a valid bind, AND it wasn't tracked as active,
-            // it means we missed the KeyDown. We should Execute it now.
+            if self.pending_deactivate_release.as_ref() == Some(&step) {
+                self.pending_deactivate_release = None;
+                return ProcessResult::consume(None);
+            }
 
-            // 1. Try to match this step against root (single hotkeys)
-            if let Some(node) = self.root.children.get(&step)
-                && let Some(action) = &node.action
-            {
-                // Check context
-                let valid_context =
-                    node.context.as_deref() == Some(current_app) || node.context.is_none();
-                if valid_context {
-                    let seq = vec![step.clone()];
-                    if self.active_activations.contains(&seq) {
-                        // Normal case: KeyDown happened, now KeyUp. Just cleanup.
-                        self.active_activations.remove(&seq);
-                        return ProcessResult::consume(None); // Consume the KeyUp
-                    } else {
-                        // KeyDown missed
-                        debug!("Executing on KeyUp for {step}");
-                        return ProcessResult::consume(Some(action.clone()));
-                    }
-                }
+            if self.active_activations.remove(&step) {
+                return ProcessResult::consume(None);
             }
 
             return ProcessResult::keep();
         }
 
-        // --- PRESS HANDLING (KeyDown) ---
+        self.pop_expired_layers();
 
-        // Try to descend from current path
-        let mut node = &self.root;
-        for s in &self.current_path {
-            if let Some(next) = node.children.get(s) {
-                node = next;
-            } else {
-                self.current_path.clear();
-                return ProcessResult::keep();
-            }
+        if let Some(top) = self.active_layers.last()
+            && top.behavior.deactivate.as_ref() == Some(&step)
+        {
+            self.active_layers.pop();
+            self.pending_deactivate_release = Some(step);
+            return ProcessResult::consume(None);
         }
 
-        if let Some(next_node) = node.children.get(&step) {
-            // Check context if it's a leaf node (handler present)
-            if let Some(action) = &next_node.action {
-                if let Some(ctx) = &next_node.context && ctx != current_app {
-                    self.current_path.clear();
-                    return ProcessResult::keep();
-                }
+        let depth = self.active_layers.len();
+        let scope_path = self
+            .active_layers
+            .last()
+            .map(|layer| layer.path.clone())
+            .unwrap_or_default();
 
-                // EXECUTE
-                debug!(
-                    "Executing hotkey sequence: {:?}",
-                    self.current_path
-                        .iter()
-                        .chain(std::iter::once(&step))
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>()
-                );
-                // Track activation
-                let mut full_seq = self.current_path.clone();
-                full_seq.push(step);
-                self.active_activations.insert(full_seq);
-
-                self.current_path.clear();
-                return ProcessResult::consume(Some(action.clone()));
-            } else {
-                // Not a leaf, just descend
-                debug!(
-                    "Entering layer: {:?}",
-                    self.current_path
-                        .iter()
-                        .chain(std::iter::once(&step))
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>()
-                );
-                self.current_path.push(step);
-                return ProcessResult::consume(None);
+        let Some(hit) = self.lookup_in_scope(&scope_path, &step, current_app) else {
+            if depth > 0 {
+                // Miss while a layer is active always pops only one frame.
+                self.active_layers.pop();
             }
-        } else {
-            self.current_path.clear();
+            return ProcessResult::keep();
+        };
 
-            // Try matching as a start of a new sequence
-            if let Some(start_node) = self.root.children.get(&step) {
-                if let Some(action) = &start_node.action {
-                    if let Some(ctx) = &start_node.context && ctx != current_app {
-                        return ProcessResult::keep();
+        self.active_activations.insert(step.clone());
+
+        if let Some(layer_behavior) = hit.layer_behavior {
+            debug!("Entering layer: {:?}", hit.full_path);
+
+            // Entering a child layer counts as handled activity in the parent layer.
+            if depth > 0 {
+                self.reset_top_deadline();
+            }
+
+            let child = ActiveLayer {
+                path: hit.full_path,
+                deadline: Self::deadline_from_timeout(layer_behavior.timeout_ms),
+                behavior: layer_behavior,
+            };
+            self.active_layers.push(child);
+            return ProcessResult::consume(None);
+        }
+
+        if let Some(action) = hit.action {
+            debug!("Executing hotkey sequence: {:?}", hit.full_path);
+
+            if depth > 0 {
+                let mode = self.active_layers[depth - 1].behavior.mode;
+                match mode {
+                    LayerMode::Oneshot => {
+                        self.active_layers.truncate(depth - 1);
                     }
-
-                    // EXECUTE
-                    debug!("Executing hotkey: {step:?}");
-                    // Track activation
-                    let seq = vec![step];
-                    self.active_activations.insert(seq);
-
-                    return ProcessResult::consume(Some(action.clone()));
-                } else {
-                    debug!("Starting layer sequence: {step:?}");
-                    self.current_path.push(step);
-                    return ProcessResult::consume(None);
+                    LayerMode::Sticky => {
+                        self.reset_top_deadline();
+                    }
                 }
             }
+
+            return ProcessResult::consume(Some(action));
         }
 
-        ProcessResult::keep()
+        ProcessResult::consume(None)
     }
 }
 
 impl Default for HotkeyManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HotkeyManager, HotkeyStep, LayerBehavior};
+    use kiwi_parser::{Action, Key, LayerMode, Modifiers};
+    use std::thread;
+    use std::time::Duration;
+
+    fn step(ch: char) -> HotkeyStep {
+        HotkeyStep::new(Key::Char(ch), Modifiers::NONE)
+    }
+
+    fn sticky(timeout: Option<u32>) -> LayerBehavior {
+        LayerBehavior {
+            mode: LayerMode::Sticky,
+            timeout_ms: timeout,
+            deactivate: None,
+        }
+    }
+
+    fn oneshot(timeout: Option<u32>) -> LayerBehavior {
+        LayerBehavior {
+            mode: LayerMode::Oneshot,
+            timeout_ms: timeout,
+            deactivate: None,
+        }
+    }
+
+    #[test]
+    fn oneshot_exits_after_hit() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, oneshot(None));
+        mgr.bind(vec![step('a'), step('b')], None, Action::Reload);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        let hit = mgr.process(Key::Char('b'), Modifiers::NONE, true, "");
+        assert!(hit.action.is_some());
+
+        let second = mgr.process(Key::Char('b'), Modifiers::NONE, true, "");
+        assert!(!second.handled);
+    }
+
+    #[test]
+    fn oneshot_exits_after_miss() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, oneshot(None));
+        mgr.bind(vec![step('a'), step('b')], None, Action::Reload);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        let miss = mgr.process(Key::Char('z'), Modifiers::NONE, true, "");
+        assert!(!miss.handled);
+
+        let after = mgr.process(Key::Char('b'), Modifiers::NONE, true, "");
+        assert!(!after.handled);
+    }
+
+    #[test]
+    fn sticky_stays_after_hit() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, sticky(None));
+        mgr.bind(vec![step('a'), step('b')], None, Action::Reload);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(mgr
+            .process(Key::Char('b'), Modifiers::NONE, true, "")
+            .action
+            .is_some());
+        assert!(mgr
+            .process(Key::Char('b'), Modifiers::NONE, true, "")
+            .action
+            .is_some());
+    }
+
+    #[test]
+    fn nested_miss_returns_to_parent() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, sticky(None));
+        mgr.register_layer(vec![step('a'), step('c')], None, sticky(None));
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+        mgr.bind(vec![step('a'), step('c'), step('y')], None, Action::Quit);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(mgr.process(Key::Char('c'), Modifiers::NONE, true, "").handled);
+
+        let miss = mgr.process(Key::Char('z'), Modifiers::NONE, true, "");
+        assert!(!miss.handled);
+
+        let parent_hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(matches!(parent_hit.action, Some(Action::Reload)));
+    }
+
+    #[test]
+    fn deactivate_is_consumed() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('a')],
+            None,
+            LayerBehavior {
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: Some(step('d')),
+            },
+        );
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(mgr.process(Key::Char('d'), Modifiers::NONE, true, "").handled);
+        assert!(mgr.process(Key::Char('d'), Modifiers::NONE, false, "").handled);
+
+        let after = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(!after.handled);
+    }
+
+    #[test]
+    fn timeout_expires_layer() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, sticky(Some(5)));
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        thread::sleep(Duration::from_millis(10));
+
+        let after_timeout = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(!after_timeout.handled);
+    }
+
+    #[test]
+    fn timeout_resets_on_handled_key() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, sticky(Some(20)));
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        thread::sleep(Duration::from_millis(15));
+
+        assert!(mgr
+            .process(Key::Char('x'), Modifiers::NONE, true, "")
+            .action
+            .is_some());
+        thread::sleep(Duration::from_millis(15));
+
+        // Still active because handled key reset timeout.
+        assert!(mgr
+            .process(Key::Char('x'), Modifiers::NONE, true, "")
+            .action
+            .is_some());
+    }
+
+    #[test]
+    fn timeout_does_not_reset_on_unhandled_event() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, sticky(Some(20)));
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+
+        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        thread::sleep(Duration::from_millis(15));
+
+        // Unhandled key-up should not reset layer timeout.
+        let _ = mgr.process(Key::Char('q'), Modifiers::NONE, false, "");
+        thread::sleep(Duration::from_millis(10));
+
+        let after_timeout = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(!after_timeout.handled);
     }
 }

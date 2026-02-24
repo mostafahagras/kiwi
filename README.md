@@ -1,82 +1,196 @@
 # Kiwi
 
-Kiwi is a minimalistic, keyboard-driven hotkey daemon for macOS. It allows you to manage windows, launch apps, and execute system commands with configurable keybindings.
+Kiwi is a keyboard-first hotkey daemon for macOS.
 
-> [!NOTE]
-> Docs coming soon...
+It intercepts key events globally and can:
+- run shell commands
+- remap keys
+- move/resize windows
+- execute sequential actions
+- switch into scoped key layers
+- temporarily pass/swallow input until an exit binding
 
-## Commands
+## Workspace Layout
 
-### 1. Open Application (`open:`)
-Launches an application by name or alias.
+- `./kiwi`: runtime daemon (event tap, hotkey dispatch, window ops)
+- `./kiwi-parser`: config parser and validation
 
-- **Syntax**: `"open:<App Name>"` or `"open:<Alias>"`
-- **Examples**:
-  ```toml
-  "alt+c" = "open:Google Chrome"
-  "alt+t" = "open:terminal"  # Assuming 'terminal' is an alias in [apps]
-  ```
+## Requirements
 
-### 2. Snap Window (`snap:`)
-Moves and resizes the focused window to a specific position on the screen.
+- macOS
+- Accessibility permissions granted to Kiwi
+- Rust toolchain (`cargo`)
 
-- **Syntax**: `"snap:<position>"`
-- **Available Positions**:
-  - **Basic**: `left`, `right`, `top`, `bottom`, `maximize`, `center`
-  - **Corners**: `topleft`, `topright`, `bottomleft`, `bottomright`
-  - **Two-Thirds**: `lefttwo` (left 2/3), `righttwo` (right 2/3), etc.
-  - **Thirds**: `leftthird`, `centerthird`, `rightthird`
-  - **Sixths**: `leftsixth`, `rightsixth`, etc.
-- **Examples**:
-  ```toml
-  "hyper+left" = "snap:left"
-  "hyper+m" = "snap:maximize"
-  ```
+## Build And Run
 
-### 3. Remap Keys (`remap:`)
-Remaps a physical key combination to simulate another key combination. Useful for creating app-specific shortcuts.
+```bash
+cargo build --release
+cargo run -p kiwi --release
+```
 
-- **Syntax**: `"remap:<Modifiers>+<Key>"`
-- **Examples**:
-  ```toml
-  # Remap Hyper+T to Command+T (e.g., inside a specific app)
-  "hyper+t" = "remap:cmd+t"
-  ```
-- **Note**: Modifiers can be abbreviated (e.g., `cmd`, `opt`, `ctrl`, `shift`).
+## Config File Resolution
 
-### 4. Execute Shell Command (`shell:`)
-Runs a shell command. This is the default action if no prefix is specified.
+Kiwi loads config from:
+1. `~/.kiwi/config.toml`
+2. `./config.toml` (fallback)
 
-- **Syntax**: `"shell:<command>"` or just `"<command>"`
-- **Examples**:
-  ```toml
-  "hyper+esc" = "shell:pmset sleepnow"
-  "hyper+q" = "pkill chrome"  # Implicit shell command
-  ```
+If neither exists, startup fails.
 
-### 5. Reload Configuration (`reload`)
-Reloads the `config.toml` file without restarting Kiwi.
+## Config Overview
 
-- **Syntax**: `"reload"`
-- **Examples**:
-  ```toml
-  "hyper+r" = "reload"
-  ```
+Top-level sections:
+- `layout = "..."` (optional keyboard layout id/alias)
+- `[mods]` (optional modifier aliases)
+- `[binds]` global bindings
+- `[apps]` optional app aliases
+- `[app."App Name"]` app-specific bindings
+- `[layer.<name>]` layers (supports nesting)
 
-## Configuration Structure
-
-Define your bindings in `~/.kiwi/config.toml`:
+Example:
 
 ```toml
+layout = "ABC"
+
+[mods]
+hyper = ["command", "option", "shift", "control"]
+
 [binds]
-"hyper+return" = "open:Terminal"
-"hyper+f" = "snap:maximize"
+"hyper+r" = "reload"
+"hyper+q" = "quit"
+"hyper+enter" = "open -a Ghostty"
 
 [apps]
 chrome = "Google Chrome"
 
-[layer.utility]
-activate = "hyper+u"
-r = "reload"
-s = "shell:say 'Reloaded'"
+[app."Google Chrome"]
+"hyper+w" = "remap:cmd+w"
 ```
+
+## Binding Syntax
+
+A binding key is `mod+mod+key` (order-insensitive modifiers).
+
+Examples:
+- `"cmd+shift+k"`
+- `"hyper+left"`
+- `"esc"`
+
+Supported modifier names include aliases like `cmd`, `opt`/`alt`, `ctrl`, `shift`.
+
+## Actions
+
+Action value can be:
+- a single string, or
+- an array of action strings (executed sequentially)
+
+```toml
+"hyper+x" = ["shell:say hi", "sleep:250", "reload"]
+```
+
+### Supported Action Prefixes
+
+- `shell:<command>`
+- `remap:<binding>`
+- `snap:<position>`
+- `resize:<mode>`
+- `sleep:<milliseconds>`
+- `pass:<binding>`
+- `swallow:<binding>`
+
+Special non-prefixed actions:
+- `reload`
+- `quit`
+
+If no known prefix is present, the value is treated as a shell command.
+
+### `pass` and `swallow`
+
+- `pass:<binding>`: Kiwi stops handling hotkeys until `<binding>` is pressed; other input is passed through.
+- `swallow:<binding>`: Kiwi swallows all input until `<binding>` is pressed.
+- Exit binding is consumed on key down/up.
+
+### Snap Modes
+
+`Snap` names are case-insensitive and ignore spaces/underscores.
+
+- Full: `Maximize`, `AlmostMaximize`, `MaximizeWidth`, `MaximizeHeight`, `Fullscreen`, `Restore`
+- Halves: `LeftHalf`, `CenterHalf`, `RightHalf`, `TopHalf`, `MiddleHalf`, `BottomHalf`
+- Thirds: `FirstThird`, `CenterThird`, `LastThird`, `TopThird`, `MiddleThird`, `BottomThird`
+- Fourths: `FirstFourth`, `SecondFourth`, `ThirdFourth`, `LastFourth`
+- Quarters: `TopLeftQuarter`, `TopCenterQuarter`, `TopRightQuarter`, `MiddleLeftQuarter`, `MiddleRightQuarter`, `BottomLeftQuarter`, `BottomCenterQuarter`, `BottomRightQuarter`
+- Sixths: `TopLeftSixth`, `TopCenterSixth`, `TopRightSixth`, `MiddleLeftSixth`, `MiddleCenterSixth`, `MiddleRightSixth`, `BottomLeftSixth`, `BottomCenterSixth`, `BottomRightSixth`
+- Edges (size-preserving): `Left`, `Right`, `Top`, `Bottom`
+
+### Resize Modes
+
+- `IncreaseWidth`
+- `IncreaseHeight`
+- `IncreaseBoth`
+- `DecreaseWidth`
+- `DecreaseHeight`
+- `DecreaseBoth`
+
+## Layers
+
+Layers define scoped keymaps activated by a trigger.
+
+### Layer Fields
+
+- `activate = "<binding>"` (required)
+- `mode = "oneshot" | "sticky"` (optional, default `oneshot`)
+- `timeout = <ms>` (optional)
+- `deactivate = "<binding>"` (optional)
+- additional key/value pairs are layer-local binds
+- nested tables under a layer are child layers
+
+### Layer Modes
+
+- `oneshot`:
+  - exits after first handled bind hit
+  - exits on miss
+- `sticky`:
+  - stays active on handled bind hit
+  - exits on miss (pops one layer frame)
+
+### Timeout Semantics
+
+- `timeout` applies to both modes.
+- `timeout = 0` disables timeout.
+- timer resets only when the active layer handles a key:
+  - executing a bind in that layer
+  - handling that layer's `deactivate`
+  - entering a child layer from that layer
+
+### Deactivate Semantics
+
+- if `deactivate` matches on key down, layer exits and event is consumed
+- corresponding key up is consumed too
+
+### Nested Layer Behavior
+
+- layers are tracked as a stack
+- miss in child layer pops to parent (not root)
+- when stack becomes empty, normal global/app handling resumes
+
+### Layer Example
+
+```toml
+[layer.open]
+activate = "hyper+o"
+mode = "sticky"
+deactivate = "esc"
+timeout = 1200
+h = "open ~"
+d = "open ~/Downloads"
+
+[layer.open.code]
+activate = "c"
+r = "open ~/code/rust"
+p = "open ~/code/py"
+```
+
+## Notes
+
+- For app launching, use shell commands like `open -a "App Name"`.
+- `reload` clears transient window-state cache and rebuilds bindings from config.
+- Action execution is sequential through a single executor thread.

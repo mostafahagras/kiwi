@@ -7,6 +7,8 @@ hyper = ["command", "option", "shift", "control"]
 
 [layer.open]
 activate = "hyper+o"
+mode = "sticky"
+deactivate = "esc"
 d = "open ~/Downloads"
 h = "open ~"
 
@@ -29,6 +31,8 @@ m = "open -a Activity Monitor"
 
 [layer.snap]
 activate = "hyper+s"
+mode = "sticky"
+timeout = 1200
 j = "snap:LeftHalf"
 k = "snap:Maximize"
 l = "snap:RightHalf"
@@ -46,6 +50,8 @@ l = "snap:BottomRightQuarter"
 
 [layer.kiwi]
 activate = "hyper+i"
+mode = "oneshot"
+timeout = 0
 r = "reload"
 
 [app."Google Chrome"]
