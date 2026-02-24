@@ -276,6 +276,7 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-graphics 0.25.0",
  "core-graphics-types 0.2.0",
+ "foreign-types",
  "kiwi-parser",
  "miette",
  "objc",

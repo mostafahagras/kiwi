@@ -1,7 +1,7 @@
 use crate::hotkey::{HotkeyManager, HotkeyStep};
 use crate::window;
 use kiwi_parser::{Action, Config, Layer, Resize, Snap};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Command as ShellCommand;
 use tracing::{debug, error, info};
 
@@ -10,12 +10,40 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static WINDOW_STATE: OnceLock<Mutex<HashMap<u32, CGRect>>> = OnceLock::new();
+const WINDOW_STATE_MAX_ENTRIES: usize = 256;
 
 fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
     WINDOW_STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+pub fn clear_window_state() {
+    if let Ok(mut state) = get_window_state().lock() {
+        state.clear();
+    }
+}
+
+fn prune_window_state() {
+    let live_ids: HashSet<u32> = window::list::current_window_ids().into_iter().collect();
+    if let Ok(mut state) = get_window_state().lock() {
+        trim_window_state(&mut state, &live_ids, WINDOW_STATE_MAX_ENTRIES);
+
+        debug!("window state cache size: {}", state.len());
+    }
+}
+
+fn trim_window_state(state: &mut HashMap<u32, CGRect>, live_ids: &HashSet<u32>, max_entries: usize) {
+    state.retain(|window_id, _| live_ids.contains(window_id));
+
+    while state.len() > max_entries {
+        if let Some(first_key) = state.keys().next().copied() {
+            state.remove(&first_key);
+        } else {
+            break;
+        }
+    }
+}
 
 pub fn launch_app(name: &str) {
     info!("Launching app: {name}");
@@ -100,6 +128,7 @@ pub fn snap_window(side: Snap) {
     if let Ok(mut state) = get_window_state().lock() {
         state.entry(focused.id).or_insert(focused.frame);
     }
+    prune_window_state();
 
     let (mut x, mut y, mut w, mut h) = (sx, sy, sw, sh);
 
@@ -298,12 +327,6 @@ pub fn snap_window(side: Snap) {
 }
 
 pub fn resize_window(resize: &Resize) {
-    let bounds = window::get_main_display_bounds();
-    let sw = bounds.size.width;
-    let sh = bounds.size.height;
-    let sx = bounds.origin.x;
-    let sy = bounds.origin.y;
-
     let focused = match window::get_focused_window() {
         Some(w) => w,
         None => return,
@@ -418,5 +441,42 @@ fn register_layer(
         let mut next_prefix = prefix.clone();
         next_prefix.push(HotkeyStep::new(trigger.key.clone(), trigger.modifiers));
         register_layer(manager, next_prefix, context.clone(), child_layer);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trim_window_state;
+    use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
+    use std::collections::{HashMap, HashSet};
+
+    fn frame() -> CGRect {
+        CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(100.0, 100.0))
+    }
+
+    #[test]
+    fn trim_window_state_drops_stale_entries() {
+        let mut state = HashMap::from([(1, frame()), (2, frame()), (3, frame())]);
+        let live_ids = HashSet::from([1, 3]);
+
+        trim_window_state(&mut state, &live_ids, 10);
+
+        assert_eq!(state.len(), 2);
+        assert!(state.contains_key(&1));
+        assert!(!state.contains_key(&2));
+        assert!(state.contains_key(&3));
+    }
+
+    #[test]
+    fn trim_window_state_enforces_capacity() {
+        let mut state = HashMap::new();
+        for id in 1..=8 {
+            state.insert(id, frame());
+        }
+        let live_ids: HashSet<u32> = (1..=8).collect();
+
+        trim_window_state(&mut state, &live_ids, 3);
+
+        assert!(state.len() <= 3);
     }
 }

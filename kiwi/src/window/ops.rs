@@ -18,7 +18,11 @@ pub fn move_focused_window(x: f64, y: f64) -> bool {
         }
 
         let attr = CFString::from_static_string("AXPosition");
-        let result = AXUIElementSetAttributeValue(window_ref, attr.as_concrete_TypeRef(), pos_val);
+        let result = AXUIElementSetAttributeValue(
+            window_ref.as_cf_type_ref(),
+            attr.as_concrete_TypeRef(),
+            pos_val,
+        );
         let _ = core_foundation::base::CFType::wrap_under_create_rule(pos_val);
 
         result == AXError::Success
@@ -39,7 +43,11 @@ pub fn resize_focused_window(width: f64, height: f64) -> bool {
         }
 
         let attr = CFString::from_static_string("AXSize");
-        let result = AXUIElementSetAttributeValue(window_ref, attr.as_concrete_TypeRef(), size_val);
+        let result = AXUIElementSetAttributeValue(
+            window_ref.as_cf_type_ref(),
+            attr.as_concrete_TypeRef(),
+            size_val,
+        );
         let _ = core_foundation::base::CFType::wrap_under_create_rule(size_val);
 
         result == AXError::Success
@@ -61,10 +69,16 @@ pub fn toggle_native_fullscreen() -> bool {
         let mut value: CFTypeRef = std::ptr::null();
 
         let result =
-            AXUIElementCopyAttributeValue(window_ref, attr.as_concrete_TypeRef(), &mut value);
+            AXUIElementCopyAttributeValue(
+                window_ref.as_cf_type_ref(),
+                attr.as_concrete_TypeRef(),
+                &mut value,
+            );
         let mut current_state = false;
         if result == AXError::Success && !value.is_null() {
             current_state = value == kCFBooleanTrue;
+            // Copy returned +1 retained object when non-null.
+            let _ = core_foundation::base::CFType::wrap_under_create_rule(value);
         }
 
         let new_state = !current_state;
@@ -75,7 +89,11 @@ pub fn toggle_native_fullscreen() -> bool {
         };
 
         let set_result =
-            AXUIElementSetAttributeValue(window_ref, attr.as_concrete_TypeRef(), val_ref);
+            AXUIElementSetAttributeValue(
+                window_ref.as_cf_type_ref(),
+                attr.as_concrete_TypeRef(),
+                val_ref,
+            );
         set_result == AXError::Success
     }
 }

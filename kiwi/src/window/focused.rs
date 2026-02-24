@@ -11,14 +11,24 @@ use core_foundation::string::CFString;
 use objc::declare::ClassDecl;
 use objc::runtime::{Object, Sel};
 use objc::{msg_send, sel, sel_impl};
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
+
+pub struct FocusedWindowRef {
+    inner: CFType,
+}
+
+impl FocusedWindowRef {
+    pub fn as_cf_type_ref(&self) -> CFTypeRef {
+        self.inner.as_CFTypeRef()
+    }
+}
 
 pub fn get_focused_window() -> Option<super::list::WindowInfo> {
     unsafe {
         let window_ref = get_focused_window_ref()?;
 
         let mut wid: CGWindowID = 0;
-        let ax_err = _AXUIElementGetWindow(window_ref, &mut wid);
+        let ax_err = _AXUIElementGetWindow(window_ref.as_cf_type_ref(), &mut wid);
         if ax_err != AXError::Success || wid == 0 {
             return None;
         }
@@ -47,25 +57,33 @@ pub fn get_focused_window() -> Option<super::list::WindowInfo> {
     }
 }
 
-pub unsafe fn get_focused_window_ref() -> Option<CFTypeRef> {
+pub fn get_focused_window_ref() -> Option<FocusedWindowRef> {
     let pid = get_frontmost_app_pid()?;
 
     let app_ref = unsafe { AXUIElementCreateApplication(pid) };
     if app_ref.is_null() {
         return None;
     }
+    // AXUIElementCreateApplication returns +1 retain; wrap to release on scope exit.
+    let app_ref = unsafe { CFType::wrap_under_create_rule(app_ref as _) };
 
     let attribute = CFString::from_static_string("AXFocusedWindow");
     let mut window_ref: CFTypeRef = std::ptr::null();
     let result = unsafe {
-        AXUIElementCopyAttributeValue(app_ref, attribute.as_concrete_TypeRef(), &mut window_ref)
+        // AXUIElementCopyAttributeValue returns a +1 retained object in `window_ref`.
+        AXUIElementCopyAttributeValue(
+            app_ref.as_CFTypeRef(),
+            attribute.as_concrete_TypeRef(),
+            &mut window_ref,
+        )
     };
 
     if result != AXError::Success || window_ref.is_null() {
         return None;
     }
 
-    Some(window_ref)
+    let window_ref = unsafe { CFType::wrap_under_create_rule(window_ref as _) };
+    Some(FocusedWindowRef { inner: window_ref })
 }
 
 fn get_frontmost_app_pid() -> Option<i32> {
@@ -108,6 +126,7 @@ pub fn get_frontmost_app_name() -> Option<String> {
 
 static FOCUSED_APP: LazyLock<Arc<RwLock<String>>> =
     LazyLock::new(|| Arc::new(RwLock::new(String::from("Unknown"))));
+static FOCUS_OBSERVER: OnceLock<usize> = OnceLock::new();
 
 pub fn get_focused_app() -> String {
     FOCUSED_APP.read().unwrap().clone()
@@ -149,6 +168,10 @@ extern "C" fn handle_notification(_this: &Object, _sel: Sel, notification: id) {
 }
 
 pub fn init_focus_observer() {
+    if FOCUS_OBSERVER.get().is_some() {
+        return;
+    }
+
     unsafe {
         let _pool = NSAutoreleasePool::new(nil);
 
@@ -184,5 +207,7 @@ pub fn init_focus_observer() {
             name: notification_name
             object: nil
         ];
+
+        let _ = FOCUS_OBSERVER.set(observer_instance as usize);
     }
 }

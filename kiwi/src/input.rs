@@ -1,19 +1,18 @@
 use crate::ffi::CGEventKeyboardGetUnicodeString;
+use foreign_types::ForeignType;
 use core_graphics::display::CGPoint;
 use core_graphics::event::CGEventTapLocation;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventType, CGKeyCode, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use kiwi_parser::{Key, KeyBinding, Modifiers};
-use std::sync::OnceLock;
+use std::cell::RefCell;
 use std::time::Duration;
 
 pub const USER_DATA: i64 = 0x6B697769; // "kiwi" in hexadecimal
 
-struct SyncEventSource(CGEventSource);
-unsafe impl Send for SyncEventSource {}
-unsafe impl Sync for SyncEventSource {}
-
-static EVENT_SOURCE: OnceLock<SyncEventSource> = OnceLock::new();
+thread_local! {
+    static EVENT_SOURCE: RefCell<Option<CGEventSource>> = const { RefCell::new(None) };
+}
 
 pub fn modifiers_from_cg_flags(flags: core_graphics::event::CGEventFlags) -> Modifiers {
     let mut result = Modifiers::NONE;
@@ -33,15 +32,15 @@ pub fn modifiers_from_cg_flags(flags: core_graphics::event::CGEventFlags) -> Mod
 }
 
 fn get_event_source() -> CGEventSource {
-    EVENT_SOURCE
-        .get_or_init(|| {
-            SyncEventSource(
+    EVENT_SOURCE.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        guard
+            .get_or_insert_with(|| {
                 CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
-                    .expect("Failed to create CGEventSource"),
-            )
-        })
-        .0
-        .clone()
+                    .expect("Failed to create CGEventSource")
+            })
+            .clone()
+    })
 }
 
 pub fn send_key_combination(combo: &KeyBinding) {
@@ -273,7 +272,7 @@ pub fn get_character_from_event(event: &CGEvent) -> Option<char> {
 
     unsafe {
         CGEventKeyboardGetUnicodeString(
-            std::mem::transmute_copy(event),
+            event.as_ptr() as _,
             buf.len() as u64,
             &mut actual_length,
             buf.as_mut_ptr(),

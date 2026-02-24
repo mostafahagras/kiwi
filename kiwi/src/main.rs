@@ -18,7 +18,7 @@ use kiwi_parser::Config;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::{process, thread};
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, warn};
 
 fn load_config() -> Config {
     let mut config_path = PathBuf::new();
@@ -110,6 +110,7 @@ fn main() {
                     info!("Reloading configuration...");
                     let new_config = load_config();
                     *mgr = manager::setup_manager(&new_config);
+                    manager::clear_window_state();
                     RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
                     info!("Configuration reloaded.");
                 }
