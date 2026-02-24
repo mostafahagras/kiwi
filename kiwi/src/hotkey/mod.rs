@@ -1,14 +1,29 @@
+use kiwi_parser::{Key, Modifiers};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use crate::parser::{Key, Modifiers};
 use std::hash::Hash;
+use std::sync::Arc;
 use tracing::{debug, trace};
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HotkeyStep {
     pub key: Key,
     pub modifiers: Modifiers,
+}
+
+impl std::fmt::Display for HotkeyStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}{}",
+            self.modifiers,
+            if self.modifiers != Modifiers::empty() {
+                "+"
+            } else {
+                ""
+            },
+            self.key
+        )
+    }
 }
 
 impl HotkeyStep {
@@ -64,29 +79,27 @@ impl HotkeyManager {
         node.context = context;
     }
 
-    pub fn process(&mut self, key: Key, modifiers: Modifiers, is_down: bool, current_app: &str) -> bool {
+    pub fn process(
+        &mut self,
+        key: Key,
+        modifiers: Modifiers,
+        is_down: bool,
+        current_app: &str,
+    ) -> bool {
         let step = HotkeyStep { key, modifiers };
-        trace!("Processing hotkey: {step:?}, is_down: {is_down}, app: {current_app}");
-        
+        trace!("[{current_app}] {} {step}", if is_down { "↓" } else { "↑" });
+
         // --- RELEASE HANDLING (KeyUp) ---
         if !is_down {
-            // Check if this specific step sequence was marked as active
-            // We need to approximate the sequence. Since 'step' is just one key,
-            // we check if ANY active activation ends with this step.
-            // Simplified: If we are in a path, we are checking that path.
-            // But if KeyDown was missed, we might not be in a path?
-            // Actually, for single binds like Hyper+Esc, the path is size 1.
-            // Let's iterate `active_activations` to see if we should remove one.
-            
-            // For Kanata, Karabiner, etc. compatibility:
             // If we receive a KeyUp that matches a valid bind, AND it wasn't tracked as active,
             // it means we missed the KeyDown. We should Execute it now.
-            
+
             // 1. Try to match this step against root (single hotkeys)
             if let Some(node) = self.root.children.get(&step) {
                 if let Some(handler) = &node.handler {
                     // Check context
-                    let valid_context = node.context.as_deref() == Some(current_app) || node.context.is_none();
+                    let valid_context =
+                        node.context.as_deref() == Some(current_app) || node.context.is_none();
                     if valid_context {
                         let seq = vec![step.clone()];
                         if self.active_activations.contains(&seq) {
@@ -95,14 +108,14 @@ impl HotkeyManager {
                             return true; // Consume the KeyUp
                         } else {
                             // KeyDown missed
-                            debug!("Executing on KeyUp for {step:?}");
+                            debug!("Executing on KeyUp for {step}");
                             handler();
                             return true;
                         }
                     }
                 }
             }
-            
+
             return false;
         }
 
@@ -128,11 +141,18 @@ impl HotkeyManager {
                         return false;
                     }
                 }
-                
+
                 // EXECUTE
-                debug!("Executing hotkey sequence: {:?}", self.current_path.iter().chain(std::iter::once(&step)).collect::<Vec<_>>());
+                debug!(
+                    "Executing hotkey sequence: {:?}",
+                    self.current_path
+                        .iter()
+                        .chain(std::iter::once(&step))
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                );
                 handler();
-                
+
                 // Track activation
                 let mut full_seq = self.current_path.clone();
                 full_seq.push(step);
@@ -142,7 +162,14 @@ impl HotkeyManager {
                 return true;
             } else {
                 // Not a leaf, just descend
-                debug!("Entering layer: {:?}", self.current_path.iter().chain(std::iter::once(&step)).collect::<Vec<_>>());
+                debug!(
+                    "Entering layer: {:?}",
+                    self.current_path
+                        .iter()
+                        .chain(std::iter::once(&step))
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                );
                 self.current_path.push(step);
                 return true;
             }
@@ -157,7 +184,7 @@ impl HotkeyManager {
                             return false;
                         }
                     }
-                    
+
                     // EXECUTE
                     debug!("Executing hotkey: {step:?}");
                     handler();

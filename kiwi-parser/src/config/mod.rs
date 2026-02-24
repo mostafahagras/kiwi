@@ -2,7 +2,7 @@ pub mod action;
 mod app;
 pub mod binding;
 pub mod error;
-mod layer;
+pub mod layer;
 mod utils;
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
         utils::MODIFIER_SUGGESTIONS,
     },
     key::{KeyBinding, Modifiers},
-    layout::{layout_exists, suggest_layout_fuzzy},
+    layout::{resolve_layout, suggest_layout_fuzzy},
 };
 use miette::{NamedSource, Report, SourceSpan};
 use std::{collections::HashMap, path::PathBuf};
@@ -69,16 +69,20 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
             (layout_val.span.end - layout_val.span.start).into(),
         );
         if let Some(l_str) = layout_val.as_str() {
-            if !layout_exists(l_str) {
-                errors.push(ConfigError::InvalidLayout {
-                    src: src.clone(),
-                    layout: l_str.to_string(),
-                    span: l_span,
-                    suggestion: suggest_layout_fuzzy(l_str)
-                        .map(|s| format!("Did you mean `{}`?", s)),
-                });
+            match resolve_layout(l_str) {
+                Some(resolved_id) => {
+                    layout = Some(resolved_id);
+                }
+                None => {
+                    errors.push(ConfigError::InvalidLayout {
+                        src: src.clone(),
+                        layout: l_str.to_string(),
+                        span: l_span,
+                        suggestion: suggest_layout_fuzzy(l_str)
+                            .map(|s| format!("Did you mean `{}`?", s)),
+                    });
+                }
             }
-            layout = Some(l_str.to_string());
         }
     }
 

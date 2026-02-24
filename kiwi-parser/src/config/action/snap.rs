@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Snap {
     // full width x full height
     /// `(0, 0, width, height)`

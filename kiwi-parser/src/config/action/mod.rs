@@ -1,15 +1,15 @@
 pub mod resize;
 pub mod snap;
 
-use crate::key::KeyBinding;
 use crate::config::{ValidationContext, binding::parse_keybinding, error::ConfigError};
+use crate::key::KeyBinding;
 use miette::SourceSpan;
 pub use resize::Resize;
 pub use snap::Snap;
 use std::time::{Duration, Instant};
 use toml_span::value::ValueInner;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// Executes any shell command.
     /// Use with caution

@@ -1,5 +1,5 @@
 use core_foundation::array::{CFArray, CFArrayRef};
-use core_foundation::base::TCFType;
+use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::string::{CFString, CFStringRef};
 use std::ffi::c_void;
 
@@ -27,6 +27,7 @@ pub fn list_available_layouts() -> Vec<String> {
                     layouts.push(id_cfstring.to_string());
                 }
             }
+            CFRelease(source_list_ref as CFTypeRef);
         }
     }
     layouts
@@ -41,24 +42,28 @@ fn normalize_input(input: &str) -> String {
     }
 }
 
-pub fn layout_exists(input: &str) -> bool {
+pub fn resolve_layout(input: &str) -> Option<String> {
     let available = list_available_layouts();
     let target = normalize_input(input);
     let apple_prefix = "com.apple.keylayout.";
 
-    available.iter().any(|id| {
+    for id in available {
         let id_low = id.to_lowercase();
-        id_low == target
-            || id_low
-                .strip_prefix(apple_prefix)
-                .map(|s| s == target)
-                .unwrap_or(false)
-    })
+        if id_low == target {
+            return Some(id);
+        }
+        if let Some(stripped) = id_low.strip_prefix(apple_prefix) {
+            if stripped == target {
+                return Some(id);
+            }
+        }
+    }
+    None
 }
 
 /// Suggests a layout while stripping the bulky Apple prefix for the user.
 pub fn suggest_layout_fuzzy(input: &str) -> Option<String> {
-    if layout_exists(input) {
+    if resolve_layout(input).is_some() {
         return None;
     }
     let available = list_available_layouts();

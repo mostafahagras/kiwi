@@ -1,7 +1,7 @@
-use super::focused::{get_focused_window_ref};
+use super::focused::get_focused_window_ref;
 use crate::ffi::*;
-use core_foundation::base::{TCFType, CFTypeRef};
-use core_foundation::string::{CFString};
+use core_foundation::base::{CFTypeRef, TCFType};
+use core_foundation::string::CFString;
 use core_graphics::display::{CGPoint, CGSize};
 
 pub fn move_focused_window(x: f64, y: f64) -> bool {
@@ -13,7 +13,9 @@ pub fn move_focused_window(x: f64, y: f64) -> bool {
 
         let pos = CGPoint { x, y };
         let pos_val = AXValueCreate(AXValueType::CGPoint, &pos as *const _ as *const _);
-        if pos_val.is_null() { return false; }
+        if pos_val.is_null() {
+            return false;
+        }
 
         let attr = CFString::from_static_string("AXPosition");
         let result = AXUIElementSetAttributeValue(window_ref, attr.as_concrete_TypeRef(), pos_val);
@@ -32,7 +34,9 @@ pub fn resize_focused_window(width: f64, height: f64) -> bool {
 
         let size = CGSize { width, height };
         let size_val = AXValueCreate(AXValueType::CGSize, &size as *const _ as *const _);
-        if size_val.is_null() { return false; }
+        if size_val.is_null() {
+            return false;
+        }
 
         let attr = CFString::from_static_string("AXSize");
         let result = AXUIElementSetAttributeValue(window_ref, attr.as_concrete_TypeRef(), size_val);
@@ -55,17 +59,23 @@ pub fn toggle_native_fullscreen() -> bool {
 
         let attr = k_ax_full_screen_attribute();
         let mut value: CFTypeRef = std::ptr::null();
-        
-        let result = AXUIElementCopyAttributeValue(window_ref, attr.as_concrete_TypeRef(), &mut value);
+
+        let result =
+            AXUIElementCopyAttributeValue(window_ref, attr.as_concrete_TypeRef(), &mut value);
         let mut current_state = false;
         if result == AXError::Success && !value.is_null() {
             current_state = value == kCFBooleanTrue;
         }
 
         let new_state = !current_state;
-        let val_ref = if new_state { kCFBooleanTrue } else { kCFBooleanFalse };
-        
-        let set_result = AXUIElementSetAttributeValue(window_ref, attr.as_concrete_TypeRef(), val_ref);
+        let val_ref = if new_state {
+            kCFBooleanTrue
+        } else {
+            kCFBooleanFalse
+        };
+
+        let set_result =
+            AXUIElementSetAttributeValue(window_ref, attr.as_concrete_TypeRef(), val_ref);
         set_result == AXError::Success
     }
 }

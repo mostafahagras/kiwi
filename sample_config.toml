@@ -1,41 +1,52 @@
-[modifiers] # modifier aliases
+[mods]
 hyper = ["command", "option", "shift", "control"]
 
-[binds] # global keybinds
-"hyper+esc" = "sleep 0.25; pmset displaysleepnow" # shell commands
+[binds]
+"hyper+esc" = "sleep 0.25; pmset displaysleepnow"
+"hyper+§" = "sleep 0.25; pmset sleepnow"
 
-[apps] # app name aliases
-chrome = "Google Chrome"
+[layer.open]
+activate = "hyper+o"
+d = "open ~/Downloads"
+h = "open ~"
 
-[layer.launch] # layers
-activate = "hyper+l" # layer activation
-s = "open:Safari" # open apps
-f = "open:Finder"
-g = "open:Ghostty"
-x = "open:Xcode"
-c = "open:Google Chrome"
-t = "open:Terminal"
+[layer.open.code]
+activate = "c"
+r = "open ~/code/rust"
+p = "open ~/code/py"
+w = "open ~/code/web"
+
+[layer.launch]
+activate = "hyper+l"
+s = "open -a Safari"
+f = "open -a Finder"
+g = "open -a Ghostty"
+x = "open -a Xcode"
+c = "open -a Google Chrome"
+v = "open -a Visual Studio Code"
+t = "open -a Terminal"
+m = "open -a Activity Monitor"
 
 [layer.snap]
 activate = "hyper+s"
-j = "snap:left"
-k = "snap:maximize"
-l = "snap:right"
-r = "snap:restore"
+j = "snap:LeftHalf"
+k = "snap:Maximize"
+l = "snap:RightHalf"
+"shift+j" = "snap:Left"
+"shift+l" = "snap:Right"
+r = "snap:Restore"
+f = "snap:Fullscreen"
 
-[layer.snap.top] # nested layers
-activate = "t"
-j = "snap:topleft"
-l = "snap:topright"
-
-[layer.snap.bottom]
-activate = "b"
-j = "snap:bottomleft"
-l = "snap:bottomright"
+[layer.snap.quarters]
+activate = "q"
+i = "snap:TopLeftQuarter"
+o = "snap:TopRightQuarter"
+k = "snap:BottomLeftQuarter"
+l = "snap:BottomRightQuarter"
 
 [layer.kiwi]
 activate = "hyper+i"
-r = "reload" # reload config
+r = "reload"
 
-[app.chrome] # per app keybinds
-"hyper+t" = "remap:command+t" # remapping keys
+[app."Google Chrome"]
+"hyper+w" = "remap:cmd+w"

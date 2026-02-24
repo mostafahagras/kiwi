@@ -100,7 +100,6 @@ impl std::fmt::Display for Key {
             Self::Spotlight => write!(f, "spotlight"),
             Self::Dictation => write!(f, "dictation"),
             Self::DoNotDisturb => write!(f, "donotdisturb"),
-            // _ => write!(f, "{:?}", self), // Fallback to debug for unhandled keys
         }
     }
 }
@@ -166,7 +165,7 @@ impl std::fmt::Display for Modifiers {
 //     Logical,
 // }
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash, Clone)]
 pub struct KeyBinding {
     pub modifiers: Modifiers,
     pub key: Key,

@@ -1,26 +1,62 @@
 pub const MODIFIER_SUGGESTIONS: &[&str] = &[
     // Control
-    "control", "ctrl", "ctl",
+    "control",
+    "ctrl",
+    "ctl",
     // Shift
-    "shift", "sft",
+    "shift",
+    "sft",
     // Option
-    "option", "opt", "alt", "alternative",
+    "option",
+    "opt",
+    "alt",
+    "alternative",
     // Command
-    "command", "cmd", "meta", "super", "windows", "win",
+    "command",
+    "cmd",
+    "meta",
+    "super",
+    "windows",
+    "win",
 ];
+
 pub const KEY_SUGGESTIONS: &[&str] = &[
-    "esc", "escape", "enter", "return", "space", "tab", "backspace", "delete",
-    "up", "down", "left", "right", "home", "end", "pageup", "pagedown",
-    "volumeup", "volumedown", "mute", "brightnessup", "brightnessdown",
-    "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"
+    "esc",
+    "escape",
+    "enter",
+    "return",
+    "space",
+    "tab",
+    "backspace",
+    "delete",
+    "up",
+    "down",
+    "left",
+    "right",
+    "home",
+    "end",
+    "pageup",
+    "pagedown",
+    "volumeup",
+    "volumedown",
+    "mute",
+    "brightnessup",
+    "brightnessdown",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11",
+    "f12",
 ];
 
-pub const ACTION_SUGGESTIONS: &[&str] = &[
-    "shell", "remap", "snap", "resize", "reload", "quit", "sleep", "swallow", "pass"
-];
-
-
-pub fn suggest_best_match<I, T>(typo: &str, candidates: I) -> Option<String> 
+pub fn suggest_best_match<I, T>(typo: &str, candidates: I) -> Option<String>
 where
     I: IntoIterator<Item = T>,
     T: AsRef<str>,

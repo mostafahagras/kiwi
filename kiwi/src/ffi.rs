@@ -126,6 +126,10 @@ unsafe extern "C" {
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
     pub fn TISCopyCurrentKeyboardInputSource() -> *mut c_void;
+    pub fn TISCreateInputSourceList(
+        properties: CFTypeRef,
+        include_all_installed: bool,
+    ) -> CFTypeRef;
     pub static kTISPropertyInputSourceID: *const c_void;
     pub static kTISNotifySelectedKeyboardInputSourceChanged: CFStringRef;
 }
@@ -142,4 +146,3 @@ unsafe extern "C" {
         suspension_behavior: isize,
     );
 }
-

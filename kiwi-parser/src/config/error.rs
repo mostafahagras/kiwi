@@ -157,4 +157,3 @@ pub enum ConfigError {
         help: String, // "Help: Use a number instead of a string (e.g., timeout = 500)"
     },
 }
-

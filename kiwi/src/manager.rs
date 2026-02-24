@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-use std::process::Command as ShellCommand;
-use crate::parser::{Config, KeyCombination, Layer, Command, SnapSide, LayerItem};
 use crate::hotkey::{HotkeyManager, HotkeyStep};
 use crate::window;
+use kiwi_parser::{Action, Config, Layer, Resize, Snap};
+use std::collections::HashMap;
+use std::process::Command as ShellCommand;
 use tracing::{debug, error, info};
 
-use std::sync::{Mutex, OnceLock};
-use std::sync::atomic::{AtomicBool, Ordering};
 use core_graphics_types::geometry::CGRect;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 static WINDOW_STATE: OnceLock<Mutex<HashMap<u32, CGRect>>> = OnceLock::new();
 
@@ -22,7 +22,48 @@ pub fn launch_app(name: &str) {
     ShellCommand::new("open").arg("-a").arg(name).spawn().ok();
 }
 
-pub fn snap_window(side: SnapSide) {
+pub fn handle_action(action: &Action) {
+    match action {
+        Action::Shell(cmd) => {
+            info!("Executing shell command: {cmd}");
+            if let Some(app_name) = cmd.strip_prefix("open -a ") {
+                launch_app(app_name.trim());
+            } else {
+                ShellCommand::new("sh").arg("-c").arg(&cmd).spawn().ok();
+            }
+        }
+        Action::Remap(binding) => {
+            info!("Remapping to: {binding:?}");
+            crate::input::send_key_combination(binding);
+        }
+        Action::Snap(side) => {
+            snap_window(side.clone());
+        }
+        Action::Reload => {
+            info!("Reload requested");
+            RELOAD_REQUESTED.store(true, Ordering::SeqCst);
+        }
+        Action::Quit => {
+            info!("Quitting Kiwi...");
+            std::process::exit(0);
+        }
+        Action::SleepFor(duration) => {
+            debug!("Sleeping for {:?}", duration);
+            std::thread::sleep(*duration);
+        }
+        Action::Sequence(actions) => {
+            for a in actions {
+                handle_action(a);
+            }
+        }
+        Action::Resize(resize) => resize_window(resize),
+        _ => {
+            error!("Action not yet fully implemented: {:?}", action);
+        }
+    }
+}
+
+pub fn snap_window(side: Snap) {
     let bounds = window::get_main_display_bounds();
     let sw = bounds.size.width;
     let sh = bounds.size.height;
@@ -34,7 +75,7 @@ pub fn snap_window(side: SnapSide) {
         None => return,
     };
 
-    if side == SnapSide::Restore {
+    if side == Snap::Restore {
         if let Ok(state) = get_window_state().lock() {
             if let Some(prev_frame) = state.get(&focused.id) {
                 window::set_focused_window_bounds(
@@ -49,7 +90,7 @@ pub fn snap_window(side: SnapSide) {
         return;
     }
 
-    if side == SnapSide::Fullscreen || side == SnapSide::Full {
+    if side == Snap::Fullscreen {
         if window::ops::toggle_native_fullscreen() {
             return;
         }
@@ -63,172 +104,319 @@ pub fn snap_window(side: SnapSide) {
     let (mut x, mut y, mut w, mut h) = (sx, sy, sw, sh);
 
     match side {
-        SnapSide::Left => w = sw / 2.0,
-        SnapSide::Right => { x = sx + sw / 2.0; w = sw / 2.0; }
-        SnapSide::Top => h = sh / 2.0,
-        SnapSide::Bottom => { y = sy + sh / 2.0; h = sh / 2.0; }
-        SnapSide::Full | SnapSide::Fullscreen | SnapSide::Maximize => {}
-        SnapSide::MaximizeHeight => { x = focused.frame.origin.x; w = focused.frame.size.width; }
-        SnapSide::MaximizeWidth => { y = focused.frame.origin.y; h = focused.frame.size.height; }
-        SnapSide::Center => {
+        Snap::Maximize => {}
+        Snap::AlmostMaximize => {
+            let margin = 20.0;
+            x = sx + margin;
+            y = sy + margin;
+            w = sw - 2.0 * margin;
+            h = sh - 2.0 * margin;
+        }
+        Snap::MaximizeWidth => {
+            y = focused.frame.origin.y;
+            h = focused.frame.size.height;
+        }
+        Snap::MaximizeHeight => {
+            x = focused.frame.origin.x;
+            w = focused.frame.size.width;
+        }
+        Snap::LeftHalf => w = sw / 2.0,
+        Snap::CenterHalf => {
+            x = sx + sw / 4.0;
+            w = sw / 2.0;
+        }
+        Snap::RightHalf => {
+            x = sx + sw / 2.0;
+            w = sw / 2.0;
+        }
+
+        Snap::FirstThird => w = sw / 3.0,
+        Snap::CenterThird => {
+            x = sx + sw / 3.0;
+            w = sw / 3.0;
+        }
+        Snap::LastThird => {
+            x = sx + 2.0 * sw / 3.0;
+            w = sw / 3.0;
+        }
+
+        Snap::FirstFourth => w = sw / 4.0,
+        Snap::SecondFourth => {
+            x = sx + sw / 4.0;
+            w = sw / 4.0;
+        }
+        Snap::ThirdFourth => {
+            x = sx + 2.0 * sw / 4.0;
+            w = sw / 4.0;
+        }
+        Snap::LastFourth => {
+            x = sx + 3.0 * sw / 4.0;
+            w = sw / 4.0;
+        }
+
+        Snap::TopHalf => h = sh / 2.0,
+        Snap::MiddleHalf => {
+            y = sy + sh / 4.0;
+            h = sh / 2.0;
+        }
+        Snap::BottomHalf => {
+            y = sy + sh / 2.0;
+            h = sh / 2.0;
+        }
+
+        Snap::TopThird => h = sh / 3.0,
+        Snap::MiddleThird => {
+            y = sy + sh / 3.0;
+            h = sh / 3.0;
+        }
+        Snap::BottomThird => {
+            y = sy + 2.0 * sh / 3.0;
+            h = sh / 3.0;
+        }
+
+        Snap::TopLeftQuarter => {
+            w = sw / 2.0;
+            h = sh / 2.0;
+        }
+        Snap::TopCenterQuarter => {
+            x = sx + sw / 4.0;
+            w = sw / 2.0;
+            h = sh / 2.0;
+        }
+        Snap::TopRightQuarter => {
+            x = sx + sw / 2.0;
+            w = sw / 2.0;
+            h = sh / 2.0;
+        }
+        Snap::MiddleLeftQuarter => {
+            w = sw / 2.0;
+            y = sy + sh / 4.0;
+            h = sh / 2.0;
+        }
+        Snap::MiddleRightQuarter => {
+            x = sx + sw / 2.0;
+            y = sy + sh / 4.0;
+            h = sh / 2.0;
+        }
+        Snap::BottomLeftQuarter => {
+            w = sw / 2.0;
+            y = sy + sh / 2.0;
+            h = sh / 2.0;
+        }
+        Snap::BottomCenterQuarter => {
+            x = sx + sw / 4.0;
+            w = sw / 2.0;
+            y = sy + sh / 2.0;
+            h = sh / 2.0;
+        }
+        Snap::BottomRightQuarter => {
+            x = sx + sw / 2.0;
+            y = sy + sh / 2.0;
+            w = sw / 2.0;
+            h = sh / 2.0;
+        }
+
+        Snap::TopLeftSixth => {
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+        Snap::TopCenterSixth => {
+            x = sx + sw / 3.0;
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+        Snap::TopRightSixth => {
+            x = sx + 2.0 * sw / 3.0;
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+        Snap::MiddleLeftSixth => {
+            w = sw / 3.0;
+            y = sy + sh / 2.0;
+            h = sh / 2.0;
+        }
+        Snap::MiddleCenterSixth => {
+            x = sx + sw / 3.0;
+            y = sy + sh / 2.0;
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+        Snap::MiddleRightSixth => {
+            x = sx + 2.0 * sw / 3.0;
+            y = sy + sh / 2.0;
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+        Snap::BottomLeftSixth => {
+            y = sy + sh / 2.0;
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+        Snap::BottomCenterSixth => {
+            x = sx + sw / 3.0;
+            y = sy + sh / 2.0;
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+        Snap::BottomRightSixth => {
+            x = sx + 2.0 * sw / 3.0;
+            y = sy + sh / 2.0;
+            w = sw / 3.0;
+            h = sh / 2.0;
+        }
+
+        Snap::Left => {
+            x = sx;
+            y = focused.frame.origin.y;
             w = focused.frame.size.width;
             h = focused.frame.size.height;
-            x = sx + (sw - w) / 2.0;
-            y = sy + (sh - h) / 2.0;
         }
-        SnapSide::TopLeft => { w = sw / 2.0; h = sh / 2.0; }
-        SnapSide::TopRight => { x = sx + sw / 2.0; w = sw / 2.0; h = sh / 2.0; }
-        SnapSide::BottomLeft => { y = sy + sh / 2.0; w = sw / 2.0; h = sh / 2.0; }
-        SnapSide::BottomRight => { x = sx + sw / 2.0; y = sy + sh / 2.0; w = sw / 2.0; h = sh / 2.0; }
-        
-        // Thirds
-        SnapSide::FirstThird => w = sw / 3.0,
-        SnapSide::CenterThird => { x = sx + sw / 3.0; w = sw / 3.0; }
-        SnapSide::LastThird => { x = sx + 2.0 * sw / 3.0; w = sw / 3.0; }
-        SnapSide::FirstTwoThirds => w = 2.0 * sw / 3.0,
-        SnapSide::LastTwoThirds => { x = sx + sw / 3.0; w = 2.0 * sw / 3.0; }
-
-        // Fourths
-        SnapSide::FirstFourth => w = sw / 4.0,
-        SnapSide::SecondFourth => { x = sx + sw / 4.0; w = sw / 4.0; }
-        SnapSide::ThirdFourth => { x = sx + 2.0 * sw / 4.0; w = sw / 4.0; }
-        SnapSide::LastFourth => { x = sx + 3.0 * sw / 4.0; w = sw / 4.0; }
-
-        // Sixths
-        SnapSide::TopLeftSixth => { w = sw / 3.0; h = sh / 2.0; }
-        SnapSide::TopCenterSixth => { x = sx + sw / 3.0; w = sw / 3.0; h = sh / 2.0; }
-        SnapSide::TopRightSixth => { x = sx + 2.0 * sw / 3.0; w = sw / 3.0; h = sh / 2.0; }
-        SnapSide::BottomLeftSixth => { y = sy + sh / 2.0; w = sw / 3.0; h = sh / 2.0; }
-        SnapSide::BottomCenterSixth => { x = sx + sw / 3.0; y = sy + sh / 2.0; w = sw / 3.0; h = sh / 2.0; }
-        SnapSide::BottomRightSixth => { x = sx + 2.0 * sw / 3.0; y = sy + sh / 2.0; w = sw / 3.0; h = sh / 2.0; }
-
-        SnapSide::MoveUp => { x = focused.frame.origin.x; y = sy; w = focused.frame.size.width; h = focused.frame.size.height; }
-        SnapSide::MoveDown => { x = focused.frame.origin.x; y = sy + sh - focused.frame.size.height; w = focused.frame.size.width; h = focused.frame.size.height; }
-        SnapSide::MoveLeft => { x = sx; y = focused.frame.origin.y; w = focused.frame.size.width; h = focused.frame.size.height; }
-        SnapSide::MoveRight => { x = sx + sw - focused.frame.size.width; y = focused.frame.origin.y; w = focused.frame.size.width; h = focused.frame.size.height; }
-
-        SnapSide::ReasonableSize => {
-            w = (sw * 0.6).min(1025.0);
-            h = (sh * 0.6).min(900.0);
-            x = sx + (sw - w) / 2.0;
-            y = sy + (sh - h) / 2.0;
+        Snap::Right => {
+            x = sx + sw - focused.frame.size.width;
+            y = focused.frame.origin.y;
+            w = focused.frame.size.width;
+            h = focused.frame.size.height;
+        }
+        Snap::Top => {
+            x = focused.frame.origin.x;
+            y = sy;
+            w = focused.frame.size.width;
+            h = focused.frame.size.height;
+        }
+        Snap::Bottom => {
+            x = focused.frame.origin.x;
+            y = sy + sh - focused.frame.size.height;
+            w = focused.frame.size.width;
+            h = focused.frame.size.height;
         }
         _ => return,
     }
 
     if window::set_focused_window_bounds(x, y, w, h) {
-        info!("Snapped window to {side:?}");
+        info!("Snapped window to {:?}", side);
+    }
+}
+
+pub fn resize_window(resize: &Resize) {
+    let bounds = window::get_main_display_bounds();
+    let sw = bounds.size.width;
+    let sh = bounds.size.height;
+    let sx = bounds.origin.x;
+    let sy = bounds.origin.y;
+
+    let focused = match window::get_focused_window() {
+        Some(w) => w,
+        None => return,
+    };
+
+    let (mut x, mut y, mut w, mut h) = (
+        focused.frame.origin.x,
+        focused.frame.origin.y,
+        focused.frame.size.width,
+        focused.frame.size.height,
+    );
+
+    match resize {
+        Resize::IncreaseWidth => {
+            x -= 10.0;
+            w += 20.0;
+        }
+        Resize::IncreaseHeight => {
+            y -= 10.0;
+            h += 20.0;
+        }
+        Resize::IncreaseBoth => {
+            x -= 10.0;
+            y -= 10.0;
+            w += 20.0;
+            h += 20.0;
+        }
+        Resize::DecreaseWidth => {
+            x += 10.0;
+            w -= 20.0;
+        }
+        Resize::DecreaseHeight => {
+            y += 10.0;
+            h -= 20.0;
+        }
+        Resize::DecreaseBoth => {
+            x += 10.0;
+            y += 10.0;
+            w -= 20.0;
+            h -= 20.0;
+        }
+    }
+
+    if window::set_focused_window_bounds(x, y, w, h) {
+        info!("Resized window to {:?}", resize);
     }
 }
 
 pub fn setup_manager(config: &Config) -> HotkeyManager {
     let mut manager = HotkeyManager::new();
 
-    // 1. Top-level binds
-    for (key_str, cmd) in &config.binds {
-        match KeyCombination::from_str_with_context(key_str, &config.modifiers) {
-            Ok(combo) => {
-                register_command(&mut manager, vec![HotkeyStep::new(combo.key, combo.modifiers)], None, cmd.clone(), config);
-            }
-            Err(e) => {
-                error!("Failed to parse bind '{key_str}': {e}");
-            }
-        }
+    // 1. Global binds
+    for (binding, action) in &config.global_binds {
+        let action = action.clone();
+        manager.bind(
+            vec![HotkeyStep::new(binding.key.clone(), binding.modifiers)],
+            None,
+            move || handle_action(&action),
+        );
     }
 
-    // 2. [layer.<name>] sections
-    for (_name, layer) in &config.layer {
-        if let Some(activate_str) = &layer.activate {
-            match KeyCombination::from_str_with_context(activate_str, &config.modifiers) {
-                Ok(combo) => {
-                    register_layer(&mut manager, vec![HotkeyStep::new(combo.key, combo.modifiers)], None, layer.clone(), config);
-                }
-                Err(e) => {
-                    error!("Failed to parse layer activation '{activate_str}': {e}");
-                }
-            }
-        }
+    // 2. Layers
+    for (trigger, layer) in &config.layers {
+        register_layer(
+            &mut manager,
+            vec![HotkeyStep::new(trigger.key.clone(), trigger.modifiers)],
+            None,
+            layer,
+        );
     }
 
-    // 3. [app.<name>] sections
-    for (app_alias, app_config) in &config.app {
-        let app_name = config.apps.get(app_alias).cloned().unwrap_or_else(|| app_alias.clone());
-        for (key_str, item) in &app_config.items {
-            match item {
-                LayerItem::Command(cmd) => {
-                    if let Ok(combo) = KeyCombination::from_str_with_context(key_str, &config.modifiers) {
-                        register_command(&mut manager, vec![HotkeyStep::new(combo.key, combo.modifiers)], Some(app_name.clone()), cmd.clone(), config);
-                    }
-                }
-                LayerItem::Layer(l) => {
-                    let trigger_str = l.activate.as_ref().unwrap_or(key_str);
-                    if let Ok(combo) = KeyCombination::from_str_with_context(trigger_str, &config.modifiers) {
-                         register_layer(&mut manager, vec![HotkeyStep::new(combo.key, combo.modifiers)], Some(app_name.clone()), l.clone(), config);
-                    }
-                }
-            }
+    // 3. Apps
+    for (app_name, app_config) in &config.apps {
+        // App binds
+        for (binding, action) in &app_config.binds {
+            let action = action.clone();
+            manager.bind(
+                vec![HotkeyStep::new(binding.key.clone(), binding.modifiers)],
+                Some(app_name.clone()),
+                move || handle_action(&action),
+            );
+        }
+        // App layers
+        for (trigger, layer) in &app_config.children {
+            register_layer(
+                &mut manager,
+                vec![HotkeyStep::new(trigger.key.clone(), trigger.modifiers)],
+                Some(app_name.clone()),
+                layer,
+            );
         }
     }
 
     manager
 }
 
-pub fn register_layer(manager: &mut HotkeyManager, prefix: Vec<HotkeyStep>, context: Option<String>, layer: Layer, config: &Config) {
-    for (key_str, item) in layer.items {
-        match item {
-            LayerItem::Command(cmd) => {
-                if let Ok(combo) = KeyCombination::from_str_with_context(&key_str, &config.modifiers) {
-                    let mut seq = prefix.clone();
-                    seq.push(HotkeyStep::new(combo.key, combo.modifiers));
-                    register_command(manager, seq, context.clone(), cmd, config);
-                }
-            }
-            LayerItem::Layer(mut sub_layer) => {
-                let trigger_str = sub_layer.activate.take().unwrap_or(key_str);
-                if let Ok(combo) = KeyCombination::from_str_with_context(&trigger_str, &config.modifiers) {
-                    let mut new_prefix = prefix.clone();
-                    new_prefix.push(HotkeyStep::new(combo.key, combo.modifiers));
-                    register_layer(manager, new_prefix, context.clone(), sub_layer, config);
-                }
-            }
-        }
+fn register_layer(
+    manager: &mut HotkeyManager,
+    prefix: Vec<HotkeyStep>,
+    context: Option<String>,
+    layer: &Layer,
+) {
+    // Layer binds
+    for (binding, action) in &layer.binds {
+        let mut sequence = prefix.clone();
+        sequence.push(HotkeyStep::new(binding.key.clone(), binding.modifiers));
+        let action = action.clone();
+        manager.bind(sequence, context.clone(), move || handle_action(&action));
     }
-}
-
-pub fn register_command(manager: &mut HotkeyManager, sequence: Vec<HotkeyStep>, context: Option<String>, mut command: Command, config: &Config) {
-    if let Command::Open(app_name) = &mut command {
-        if let Some(resolved) = config.apps.get(app_name) {
-            *app_name = resolved.clone();
-        }
-    }
-
-    match command {
-        Command::Open(app) => {
-            manager.bind(sequence, context, move || launch_app(&app));
-        }
-        Command::Snap(side) => {
-            manager.bind(sequence, context, move || snap_window(side));
-        }
-        Command::Remap(keys) => {
-            // Parse the keys to send (e.g. "Ctrl+T")
-            if let Ok(combo) = KeyCombination::from_str_with_context(&keys, &config.modifiers) {
-                manager.bind(sequence, context, move || {
-                    info!("Remapping to: {combo:?}");
-                    crate::input::send_key_combination(&combo);
-                });
-            }
-        }
-        Command::Shell(cmd) => {
-            manager.bind(sequence, context, move || {
-                info!("Executing shell command: {cmd}");
-                ShellCommand::new("sh").arg("-c").arg(&cmd).spawn().ok();
-            });
-        }
-        Command::Reload => {
-            manager.bind(sequence, context, || {
-                info!("Reload requested");
-                RELOAD_REQUESTED.store(true, Ordering::SeqCst);
-            });
-        }
+    // Nested layers
+    for (trigger, child_layer) in &layer.children {
+        let mut next_prefix = prefix.clone();
+        next_prefix.push(HotkeyStep::new(trigger.key.clone(), trigger.modifiers));
+        register_layer(manager, next_prefix, context.clone(), child_layer);
     }
 }
