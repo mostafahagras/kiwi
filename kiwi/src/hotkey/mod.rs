@@ -48,6 +48,12 @@ impl HotkeyNode {
     }
 }
 
+impl Default for HotkeyNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone)]
 pub struct HotkeyManager {
     root: HotkeyNode,
@@ -88,7 +94,7 @@ impl HotkeyManager {
     pub fn bind(&mut self, sequence: Vec<HotkeyStep>, context: Option<String>, action: Action) {
         let mut node = &mut self.root;
         for step in sequence {
-            node = node.children.entry(step).or_insert_with(HotkeyNode::new);
+            node = node.children.entry(step).or_default();
         }
         node.action = Some(action);
         node.context = context;
@@ -110,22 +116,22 @@ impl HotkeyManager {
             // it means we missed the KeyDown. We should Execute it now.
 
             // 1. Try to match this step against root (single hotkeys)
-            if let Some(node) = self.root.children.get(&step) {
-                if let Some(action) = &node.action {
-                    // Check context
-                    let valid_context =
-                        node.context.as_deref() == Some(current_app) || node.context.is_none();
-                    if valid_context {
-                        let seq = vec![step.clone()];
-                        if self.active_activations.contains(&seq) {
-                            // Normal case: KeyDown happened, now KeyUp. Just cleanup.
-                            self.active_activations.remove(&seq);
-                            return ProcessResult::consume(None); // Consume the KeyUp
-                        } else {
-                            // KeyDown missed
-                            debug!("Executing on KeyUp for {step}");
-                            return ProcessResult::consume(Some(action.clone()));
-                        }
+            if let Some(node) = self.root.children.get(&step)
+                && let Some(action) = &node.action
+            {
+                // Check context
+                let valid_context =
+                    node.context.as_deref() == Some(current_app) || node.context.is_none();
+                if valid_context {
+                    let seq = vec![step.clone()];
+                    if self.active_activations.contains(&seq) {
+                        // Normal case: KeyDown happened, now KeyUp. Just cleanup.
+                        self.active_activations.remove(&seq);
+                        return ProcessResult::consume(None); // Consume the KeyUp
+                    } else {
+                        // KeyDown missed
+                        debug!("Executing on KeyUp for {step}");
+                        return ProcessResult::consume(Some(action.clone()));
                     }
                 }
             }
@@ -149,11 +155,9 @@ impl HotkeyManager {
         if let Some(next_node) = node.children.get(&step) {
             // Check context if it's a leaf node (handler present)
             if let Some(action) = &next_node.action {
-                if let Some(ctx) = &next_node.context {
-                    if ctx != current_app {
-                        self.current_path.clear();
-                        return ProcessResult::keep();
-                    }
+                if let Some(ctx) = &next_node.context && ctx != current_app {
+                    self.current_path.clear();
+                    return ProcessResult::keep();
                 }
 
                 // EXECUTE
@@ -191,10 +195,8 @@ impl HotkeyManager {
             // Try matching as a start of a new sequence
             if let Some(start_node) = self.root.children.get(&step) {
                 if let Some(action) = &start_node.action {
-                    if let Some(ctx) = &start_node.context {
-                        if ctx != current_app {
-                            return ProcessResult::keep();
-                        }
+                    if let Some(ctx) = &start_node.context && ctx != current_app {
+                        return ProcessResult::keep();
                     }
 
                     // EXECUTE
@@ -213,5 +215,11 @@ impl HotkeyManager {
         }
 
         ProcessResult::keep()
+    }
+}
+
+impl Default for HotkeyManager {
+    fn default() -> Self {
+        Self::new()
     }
 }

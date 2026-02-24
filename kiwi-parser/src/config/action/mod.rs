@@ -46,7 +46,7 @@ pub fn parse_action(
 ) -> Option<Action> {
     let span = SourceSpan::new(
         value.span.start.into(),
-        (value.span.end - value.span.start).into(),
+        value.span.end - value.span.start,
     );
 
     match value.as_ref() {

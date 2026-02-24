@@ -43,36 +43,36 @@ fn k_cg_window_level() -> CFString {
 
 pub fn dict_to_window_info(dict: &CFDictionary<CFString, CFType>) -> Option<WindowInfo> {
     let id = dict
-        .find(&k_cg_window_number())
+        .find(k_cg_window_number())
         .and_then(|v| cfnumber_to_u32(&v))?;
 
     let pid = dict
-        .find(&k_cg_window_owner_pid())
+        .find(k_cg_window_owner_pid())
         .and_then(|v| cfnumber_to_i32(&v))
         .unwrap_or(0);
 
     let app_name = dict
-        .find(&k_cg_window_owner_name())
+        .find(k_cg_window_owner_name())
         .and_then(|v| cfstring_to_string(&v))
         .unwrap_or_else(|| "Unknown".into());
 
     let title = dict
-        .find(&k_cg_window_name())
+        .find(k_cg_window_name())
         .and_then(|v| cfstring_to_string(&v))
         .unwrap_or_default();
 
     let layer = dict
-        .find(&k_cg_window_layer())
+        .find(k_cg_window_layer())
         .and_then(|v| cfnumber_to_i32(&v))
         .unwrap_or(0);
 
     let level = dict
-        .find(&k_cg_window_level())
+        .find(k_cg_window_level())
         .and_then(|v| cfnumber_to_i32(&v))
         .unwrap_or(0);
 
     let frame = dict
-        .find(&k_cg_window_bounds())
+        .find(k_cg_window_bounds())
         .and_then(|v| cf_dictionary_to_rect(&v))
         .unwrap_or(CGRect::new(&CGPoint::new(0., 0.), &CGSize::new(0., 0.)));
 
@@ -103,7 +103,7 @@ pub fn current_window_ids() -> Vec<CGWindowID> {
         for i in 0..array.len() {
             if let Some(dict_ref) = array.get(i)
                 && let Some(id) = dict_ref
-                    .find(&k_cg_window_number())
+                    .find(k_cg_window_number())
                     .and_then(|v| cfnumber_to_u32(&v))
             {
                 ids.push(id);
@@ -138,13 +138,8 @@ pub fn cfstring_to_string(cf: &CFType) -> Option<String> {
 
 pub fn cf_dictionary_to_rect(cf: &CFType) -> Option<CGRect> {
     if cf.instance_of::<CFDictionary>() {
-        let dict_ref = unsafe {
-            CFDictionary::<CFString, CFType>::wrap_under_get_rule(
-                cf.as_CFTypeRef() as *const _ as *mut _
-            )
-        };
-        let raw_dict = dict_ref.as_CFTypeRef();
-        let cg_dict = unsafe { CFDictionary::wrap_under_get_rule(raw_dict as *const _ as *mut _) };
+        let raw_dict = cf.as_CFTypeRef() as *const _ as *mut _;
+        let cg_dict: CFDictionary = unsafe { CFDictionary::wrap_under_get_rule(raw_dict) };
         CGRect::from_dict_representation(&cg_dict)
     } else {
         None

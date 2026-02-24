@@ -44,12 +44,11 @@ pub fn get_focused_window() -> Option<super::list::WindowInfo> {
             CFArray::wrap_under_create_rule(array_ref as *mut _);
 
         for i in 0..array.len() {
-            if let Some(dict_ref) = array.get(i) {
-                if let Some(win) = dict_to_window_info(&dict_ref) {
-                    if win.id == wid {
-                        return Some(win);
-                    }
-                }
+            if let Some(dict_ref) = array.get(i)
+                && let Some(win) = dict_to_window_info(&dict_ref)
+                && win.id == wid
+            {
+                return Some(win);
             }
         }
 

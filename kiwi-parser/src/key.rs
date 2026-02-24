@@ -33,7 +33,7 @@ pub enum Key {
 }
 
 impl Key {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         let s = s.to_lowercase();
         match s.as_str() {
             "esc" | "escape" => Some(Self::Esc),
@@ -116,7 +116,7 @@ bitflags::bitflags! {
 }
 
 impl Modifiers {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().trim().trim_matches('+') {
             "control" | "ctrl" | "ctl" => Self::CONTROL,
             "shift" | "sft" => Self::SHIFT,
@@ -128,7 +128,7 @@ impl Modifiers {
     pub fn from_parts(parts: Vec<&str>) -> Self {
         let mut modifiers = Modifiers::NONE;
         for part in parts {
-            modifiers |= Modifiers::from_str(part);
+            modifiers |= Modifiers::parse(part);
         }
         modifiers
     }

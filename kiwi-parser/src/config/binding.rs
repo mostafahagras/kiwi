@@ -39,10 +39,10 @@ pub fn parse_keybinding(
 
     // 1. Process each part
     for &part in &parts {
-        let raw_m = Modifiers::from_str(part);
+        let raw_m = Modifiers::parse(part);
         let is_valid_mod = !raw_m.is_empty();
         let is_valid_alias = ctx.modifier_names.contains(&part.to_string());
-        let k = Key::from_str(part);
+        let k = Key::parse(part);
         let is_valid_key = k.is_some();
 
         if is_valid_mod || is_valid_alias || is_valid_key {
@@ -97,14 +97,15 @@ pub fn parse_keybinding(
     }
 
     // 3. Report Unoptimized Warnings
-    if !used_any_alias && resolved_mods.bits().count_ones() > 1 {
-        if let Some((alias_name, _)) = ctx.modifier_map.get(&resolved_mods) {
-            errors.push(ConfigError::UnoptimizedBind {
-                src: ctx.src.clone(),
-                alias: alias_name.clone(),
-                span,
-            });
-        }
+    if !used_any_alias
+        && resolved_mods.bits().count_ones() > 1
+        && let Some((alias_name, _)) = ctx.modifier_map.get(&resolved_mods)
+    {
+        errors.push(ConfigError::UnoptimizedBind {
+            src: ctx.src.clone(),
+            alias: alias_name.clone(),
+            span,
+        });
     }
 
     // 4. Construction

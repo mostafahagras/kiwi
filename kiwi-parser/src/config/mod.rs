@@ -47,7 +47,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
     let doc = match parse(raw_toml) {
         Ok(d) => d,
         Err(e) => {
-            let span = SourceSpan::new(e.span.start.into(), (e.span.end - e.span.start).into());
+            let span = SourceSpan::new(e.span.start.into(), e.span.end - e.span.start);
             return Err(Report::new(ConfigError::Syntax {
                 src,
                 span,
@@ -66,7 +66,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
     if let Some(layout_val) = root.get("layout") {
         let l_span = SourceSpan::new(
             layout_val.span.start.into(),
-            (layout_val.span.end - layout_val.span.start).into(),
+            layout_val.span.end - layout_val.span.start,
         );
         if let Some(l_str) = layout_val.as_str() {
             match resolve_layout(l_str) {
@@ -94,10 +94,10 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
             let key_str = key.to_string();
             let key_span = SourceSpan::new(
                 key.span.start.into(),
-                (key.span.end - key.span.start).into(),
+                key.span.end - key.span.start,
             );
 
-            if !Modifiers::from_str(&key_str).is_empty() {
+            if !Modifiers::parse(&key_str).is_empty() {
                 errors.push(ConfigError::InvalidBinding {
                     src: src.clone(),
                     raw: key_str.clone(),
@@ -112,7 +112,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 
             let val_span = SourceSpan::new(
                 val.span.start.into(),
-                (val.span.end - val.span.start).into(),
+                val.span.end - val.span.start,
             );
 
             let raw_parts: Vec<&str> = match val.as_ref() {
@@ -126,7 +126,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 
             let mut modifiers = Modifiers::NONE;
             for &part in &raw_parts {
-                let m = Modifiers::from_str(part);
+                let m = Modifiers::parse(part);
                 if m.is_empty() {
                     // It's not a valid modifier! Check for typos.
                     // Note: We don't check ctx.modifier_names here because
@@ -177,7 +177,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
             if let Some(real_name) = val.as_str() {
                 let app_span = SourceSpan::new(
                     val.span.start.into(),
-                    (val.span.end - val.span.start).into(),
+                    val.span.end - val.span.start,
                 );
 
                 // Validation logic
@@ -213,7 +213,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
             let key_str = raw_key.to_string();
             let key_span = SourceSpan::new(
                 raw_key.span.start.into(),
-                (raw_key.span.end - raw_key.span.start).into(),
+                raw_key.span.end - raw_key.span.start,
             );
 
             // 1. Parse the trigger (Key + Modifiers)

@@ -34,9 +34,9 @@ impl TryFrom<&str> for Resize {
     }
 }
 
-impl Into<&'static str> for Resize {
-    fn into(self) -> &'static str {
-        match self {
+impl From<Resize> for &'static str {
+    fn from(val: Resize) -> Self {
+        match val {
             Resize::IncreaseWidth => "IncreaseWidth",
             Resize::IncreaseHeight => "IncreaseHeight",
             Resize::IncreaseBoth => "IncreaseBoth",

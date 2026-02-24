@@ -60,9 +60,7 @@ pub enum AXValueType {
     Illegal = 0,
 }
 
-#[link(name = "CoreGraphics", kind = "framework")]
 #[link(name = "ApplicationServices", kind = "framework")]
-#[link(name = "AppKit", kind = "framework")]
 unsafe extern "C" {
     pub fn CGWindowListCopyWindowInfo(
         option: CGWindowListOption,

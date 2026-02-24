@@ -27,7 +27,7 @@ pub fn parse_apps(
         let resolved_name = ctx.app_aliases.get(&key_str).cloned().unwrap_or(key_str);
         let key_span = SourceSpan::new(
             key.span.start.into(),
-            (key.span.end - key.span.start).into(),
+            key.span.end - key.span.start,
         );
 
         if let Some(inner_table) = val.as_table() {
@@ -48,7 +48,7 @@ pub fn parse_apps(
                 let i_key_str = i_key.to_string();
                 let i_key_span = SourceSpan::new(
                     i_key.span.start.into(),
-                    (i_key.span.end - i_key.span.start).into(),
+                    i_key.span.end - i_key.span.start,
                 );
 
                 // Skip child tables; handled by recursion
@@ -63,10 +63,10 @@ pub fn parse_apps(
                 }
 
                 // Parse as a binding
-                if let Some(trigger) = parse_keybinding(&i_key_str, i_key_span, errors, ctx) {
-                    if let Some(action) = parse_action(i_val, errors, ctx) {
-                        app_binds.insert(trigger, action);
-                    }
+                if let Some(trigger) = parse_keybinding(&i_key_str, i_key_span, errors, ctx)
+                    && let Some(action) = parse_action(i_val, errors, ctx)
+                {
+                    app_binds.insert(trigger, action);
                 }
             }
 

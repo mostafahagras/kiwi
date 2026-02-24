@@ -49,6 +49,7 @@ impl LayoutHandle {
 
             let list: CFArray<CFTypeRef> = CFArray::wrap_under_get_rule(list_ref as CFArrayRef);
             let property_key = CFString::wrap_under_get_rule(kTISPropertyInputSourceID as CFStringRef);
+            let requested_layout_id = CFString::new(layout_id);
 
             let mut selected: Option<CFTypeRef> = None;
             for i in 0..list.len() {
@@ -63,7 +64,7 @@ impl LayoutHandle {
                 }
 
                 let id_cfstr = CFString::wrap_under_get_rule(id_ptr as CFStringRef);
-                if id_cfstr.to_string() == layout_id {
+                if id_cfstr == requested_layout_id {
                     // Keep source alive beyond list lifetime.
                     let retained = CFRetain(source as _) as CFTypeRef;
                     selected = Some(retained);

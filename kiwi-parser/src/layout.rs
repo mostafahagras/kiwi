@@ -52,10 +52,10 @@ pub fn resolve_layout(input: &str) -> Option<String> {
         if id_low == target {
             return Some(id);
         }
-        if let Some(stripped) = id_low.strip_prefix(apple_prefix) {
-            if stripped == target {
-                return Some(id);
-            }
+        if let Some(stripped) = id_low.strip_prefix(apple_prefix)
+            && stripped == target
+        {
+            return Some(id);
         }
     }
     None

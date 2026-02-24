@@ -166,9 +166,9 @@ impl TryFrom<&str> for Snap {
     }
 }
 
-impl Into<&'static str> for Snap {
-    fn into(self) -> &'static str {
-        match self {
+impl From<Snap> for &'static str {
+    fn from(val: Snap) -> Self {
+        match val {
             Snap::Maximize => "Maximize",
             Snap::AlmostMaximize => "AlmostMaximize",
             Snap::MaximizeWidth => "MaximizeWidth",

@@ -252,10 +252,10 @@ pub fn from_cg_code(code: u16, char: Option<char>) -> Option<Key> {
             } else {
                 match char {
                     Some(mut c) => {
-                        if (1..=26).contains(&(c as u32)) {
-                            if let Some(base_char) = char::from_u32((c as u32 - 1) + 'a' as u32) {
-                                c = base_char;
-                            }
+                        if (1..=26).contains(&(c as u32))
+                            && let Some(base_char) = char::from_u32((c as u32 - 1) + 'a' as u32)
+                        {
+                            c = base_char;
                         }
                         Some(Key::Char(c.to_ascii_lowercase()))
                     }

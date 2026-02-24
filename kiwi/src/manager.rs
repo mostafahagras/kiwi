@@ -210,24 +210,22 @@ pub fn snap_window(side: Snap) {
     };
 
     if side == Snap::Restore {
-        if let Ok(state) = get_window_state().lock() {
-            if let Some(prev_frame) = state.get(&focused.id) {
-                window::set_focused_window_bounds(
-                    prev_frame.origin.x,
-                    prev_frame.origin.y,
-                    prev_frame.size.width,
-                    prev_frame.size.height,
-                );
-                return;
-            }
+        if let Ok(state) = get_window_state().lock()
+            && let Some(prev_frame) = state.get(&focused.id)
+        {
+            window::set_focused_window_bounds(
+                prev_frame.origin.x,
+                prev_frame.origin.y,
+                prev_frame.size.width,
+                prev_frame.size.height,
+            );
+            return;
         }
         return;
     }
 
-    if side == Snap::Fullscreen {
-        if window::ops::toggle_native_fullscreen() {
-            return;
-        }
+    if side == Snap::Fullscreen && window::ops::toggle_native_fullscreen() {
+        return;
     }
 
     // Save state before snapping
