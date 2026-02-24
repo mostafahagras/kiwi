@@ -1,6 +1,6 @@
 use crate::hotkey::{HotkeyManager, HotkeyStep};
 use crate::window;
-use kiwi_parser::{Action, Config, Layer, Resize, Snap};
+use kiwi_parser::{Action, Config, Key, KeyBinding, Layer, Modifiers, Resize, Snap};
 use std::collections::{HashMap, HashSet};
 use std::process::Command as ShellCommand;
 use std::sync::mpsc::{self, Sender};
@@ -13,12 +13,79 @@ use std::sync::{Mutex, OnceLock};
 static WINDOW_STATE: OnceLock<Mutex<HashMap<u32, CGRect>>> = OnceLock::new();
 const WINDOW_STATE_MAX_ENTRIES: usize = 256;
 static ACTION_SENDER: OnceLock<Sender<Action>> = OnceLock::new();
+static INTERCEPT_MODE: OnceLock<Mutex<Option<InterceptMode>>> = OnceLock::new();
 
 fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
     WINDOW_STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy)]
+enum InterceptKind {
+    Pass,
+    Swallow,
+}
+
+#[derive(Clone)]
+struct InterceptMode {
+    kind: InterceptKind,
+    exit: KeyBinding,
+    awaiting_exit_key_up: bool,
+}
+
+pub enum InterceptDecision {
+    ProcessNormally,
+    KeepWithoutProcessing,
+    DropWithoutProcessing,
+}
+
+fn get_intercept_mode() -> &'static Mutex<Option<InterceptMode>> {
+    INTERCEPT_MODE.get_or_init(|| Mutex::new(None))
+}
+
+fn activate_intercept_mode(kind: InterceptKind, exit: KeyBinding) {
+    if let Ok(mut mode) = get_intercept_mode().lock() {
+        if mode.is_none() {
+            *mode = Some(InterceptMode {
+                kind,
+                exit,
+                awaiting_exit_key_up: false,
+            });
+        } else {
+            debug!("Ignoring intercept activation while another intercept mode is active");
+        }
+    }
+}
+
+fn is_exit_key_down(mode: &InterceptMode, key: &Key, modifiers: Modifiers) -> bool {
+    mode.exit.key == *key && mode.exit.modifiers == modifiers
+}
+
+pub fn intercept_decision(key: &Key, modifiers: Modifiers, is_down: bool) -> InterceptDecision {
+    let Ok(mut guard) = get_intercept_mode().lock() else {
+        return InterceptDecision::ProcessNormally;
+    };
+
+    let Some(mode) = guard.as_mut() else {
+        return InterceptDecision::ProcessNormally;
+    };
+
+    if is_down && is_exit_key_down(mode, key, modifiers) {
+        mode.awaiting_exit_key_up = true;
+        return InterceptDecision::DropWithoutProcessing;
+    }
+
+    if !is_down && mode.awaiting_exit_key_up && mode.exit.key == *key {
+        *guard = None;
+        return InterceptDecision::DropWithoutProcessing;
+    }
+
+    match mode.kind {
+        InterceptKind::Pass => InterceptDecision::KeepWithoutProcessing,
+        InterceptKind::Swallow => InterceptDecision::DropWithoutProcessing,
+    }
+}
 
 pub fn init_action_executor() {
     if ACTION_SENDER.get().is_some() {
@@ -116,6 +183,14 @@ pub fn handle_action(action: &Action) {
             }
         }
         Action::Resize(resize) => resize_window(resize),
+        Action::Pass(exit_binding) => {
+            info!("Entering pass mode until {:?}", exit_binding);
+            activate_intercept_mode(InterceptKind::Pass, exit_binding.clone());
+        }
+        Action::Swallow(exit_binding) => {
+            info!("Entering swallow mode until {:?}", exit_binding);
+            activate_intercept_mode(InterceptKind::Swallow, exit_binding.clone());
+        }
         _ => {
             error!("Action not yet fully implemented: {:?}", action);
         }
@@ -475,11 +550,25 @@ fn register_layer(
 #[cfg(test)]
 mod tests {
     use super::trim_window_state;
+    use super::{
+        activate_intercept_mode, get_intercept_mode, intercept_decision, InterceptDecision,
+        InterceptKind,
+    };
+    use kiwi_parser::{Key, KeyBinding, Modifiers};
     use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
     use std::collections::{HashMap, HashSet};
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn frame() -> CGRect {
         CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(100.0, 100.0))
+    }
+
+    fn reset_intercept_mode() {
+        if let Ok(mut guard) = get_intercept_mode().lock() {
+            *guard = None;
+        }
     }
 
     #[test]
@@ -506,5 +595,57 @@ mod tests {
         trim_window_state(&mut state, &live_ids, 3);
 
         assert!(state.len() <= 3);
+    }
+
+    #[test]
+    fn swallow_mode_consumes_until_exit() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        reset_intercept_mode();
+
+        activate_intercept_mode(
+            InterceptKind::Swallow,
+            KeyBinding {
+                modifiers: Modifiers::COMMAND,
+                key: Key::Char('x'),
+            },
+        );
+
+        let decision = intercept_decision(&Key::Char('a'), Modifiers::NONE, true);
+        assert!(matches!(decision, InterceptDecision::DropWithoutProcessing));
+
+        let down_exit = intercept_decision(&Key::Char('x'), Modifiers::COMMAND, true);
+        assert!(matches!(down_exit, InterceptDecision::DropWithoutProcessing));
+
+        let up_exit = intercept_decision(&Key::Char('x'), Modifiers::NONE, false);
+        assert!(matches!(up_exit, InterceptDecision::DropWithoutProcessing));
+
+        let after = intercept_decision(&Key::Char('a'), Modifiers::NONE, true);
+        assert!(matches!(after, InterceptDecision::ProcessNormally));
+    }
+
+    #[test]
+    fn pass_mode_keeps_non_exit_but_skips_processing() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        reset_intercept_mode();
+
+        activate_intercept_mode(
+            InterceptKind::Pass,
+            KeyBinding {
+                modifiers: Modifiers::CONTROL,
+                key: Key::Char('q'),
+            },
+        );
+
+        let decision = intercept_decision(&Key::Char('a'), Modifiers::NONE, true);
+        assert!(matches!(decision, InterceptDecision::KeepWithoutProcessing));
+
+        let down_exit = intercept_decision(&Key::Char('q'), Modifiers::CONTROL, true);
+        assert!(matches!(down_exit, InterceptDecision::DropWithoutProcessing));
+
+        let up_exit = intercept_decision(&Key::Char('q'), Modifiers::NONE, false);
+        assert!(matches!(up_exit, InterceptDecision::DropWithoutProcessing));
+
+        let after = intercept_decision(&Key::Char('a'), Modifiers::NONE, true);
+        assert!(matches!(after, InterceptDecision::ProcessNormally));
     }
 }

@@ -103,6 +103,15 @@ fn main() {
             };
             let modifiers = input::modifiers_from_cg_flags(flags);
             let app_name = crate::window::get_focused_app();
+            match manager::intercept_decision(&key, modifiers, is_down) {
+                manager::InterceptDecision::ProcessNormally => {}
+                manager::InterceptDecision::KeepWithoutProcessing => {
+                    return CallbackResult::Keep;
+                }
+                manager::InterceptDecision::DropWithoutProcessing => {
+                    return CallbackResult::Drop;
+                }
+            }
 
             if let Ok(mut mgr) = manager_ref.lock() {
                 let result = mgr.process(key, modifiers, is_down, &app_name);
