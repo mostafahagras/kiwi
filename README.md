@@ -28,6 +28,33 @@ cargo build --release
 cargo run -p kiwi --release
 ```
 
+## CLI
+
+`kiwi` without subcommands starts the daemon.
+
+Common commands:
+
+```bash
+kiwi install     # alias: kiwi i
+kiwi update [--path /path/to/kiwi]
+kiwi daemon start|stop|restart|status [--plist /path/to/com.example.kiwi.plist]
+kiwi check [--config /path/to/config.toml]
+kiwi config path
+kiwi config init [--force]
+kiwi logs path
+kiwi logs tail [--stream stdout|stderr|both] [--lines 100]
+```
+
+Install entrypoint:
+
+```bash
+kiwi i
+# or
+kiwi install
+```
+
+This runs the macOS bundle/launch-agent installer flow from `kiwi/src/package.rs`.
+
 ## Config File Resolution
 
 Kiwi loads config from:
