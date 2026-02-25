@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::time::{Duration, Instant};
 use tracing::{debug, trace};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct HotkeyStep {
     pub key: Key,
     pub modifiers: Modifiers,
@@ -23,6 +23,12 @@ impl std::fmt::Display for HotkeyStep {
             },
             self.key
         )
+    }
+}
+
+impl std::fmt::Debug for HotkeyStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
     }
 }
 
@@ -169,11 +175,14 @@ impl HotkeyManager {
         Some(node)
     }
 
-    fn lookup_in_scope(&self, path: &[HotkeyStep], step: &HotkeyStep, current_app: &str) -> Option<LookupHit> {
+    fn lookup_in_scope(
+        &self,
+        path: &[HotkeyStep],
+        step: &HotkeyStep,
+        current_app: &str,
+    ) -> Option<LookupHit> {
         let scope = self.node_for_path(path)?;
-        // println!("{:?}", scope.children);
         let node = scope.children.get(step)?;
-        println!("{:?}", node);
 
         if let Some(ctx) = &node.context
             && ctx != current_app
@@ -236,8 +245,6 @@ impl HotkeyManager {
             if self.active_activations.remove(&step) {
                 return ProcessResult::consume(None);
             }
-
-            return ProcessResult::keep();
         }
 
         self.pop_expired_layers();
@@ -246,7 +253,9 @@ impl HotkeyManager {
             && top.behavior.deactivate.as_ref() == Some(&step)
         {
             self.active_layers.pop();
-            self.pending_deactivate_release = Some(step);
+            if is_down {
+                self.pending_deactivate_release = Some(step);
+            }
             return ProcessResult::consume(None);
         }
 
@@ -258,14 +267,17 @@ impl HotkeyManager {
             .unwrap_or_default();
 
         let Some(hit) = self.lookup_in_scope(&scope_path, &step, current_app) else {
-            if depth > 0 {
+            if depth > 0 && is_down {
                 // Miss while a layer is active always pops only one frame.
+                // We only do this on keydown to avoid double-popping if keyup also misses.
                 self.active_layers.pop();
             }
             return ProcessResult::keep();
         };
 
-        self.active_activations.insert(step.clone());
+        if is_down {
+            self.active_activations.insert(step.clone());
+        }
 
         if let Some(layer_behavior) = hit.layer_behavior {
             debug!("Entering layer: {:?}", hit.full_path);
@@ -391,7 +403,10 @@ mod tests {
         mgr.register_layer(vec![step('a')], None, oneshot(None));
         mgr.bind(vec![step('a'), step('b')], None, Action::Reload);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
         let hit = mgr.process(Key::Char('b'), Modifiers::NONE, true, "");
         assert!(hit.action.is_some());
 
@@ -405,7 +420,10 @@ mod tests {
         mgr.register_layer(vec![step('a')], None, oneshot(None));
         mgr.bind(vec![step('a'), step('b')], None, Action::Reload);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
         let miss = mgr.process(Key::Char('z'), Modifiers::NONE, true, "");
         assert!(!miss.handled);
 
@@ -419,15 +437,20 @@ mod tests {
         mgr.register_layer(vec![step('a')], None, sticky(None));
         mgr.bind(vec![step('a'), step('b')], None, Action::Reload);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
-        assert!(mgr
-            .process(Key::Char('b'), Modifiers::NONE, true, "")
-            .action
-            .is_some());
-        assert!(mgr
-            .process(Key::Char('b'), Modifiers::NONE, true, "")
-            .action
-            .is_some());
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
+        assert!(
+            mgr.process(Key::Char('b'), Modifiers::NONE, true, "")
+                .action
+                .is_some()
+        );
+        assert!(
+            mgr.process(Key::Char('b'), Modifiers::NONE, true, "")
+                .action
+                .is_some()
+        );
     }
 
     #[test]
@@ -438,8 +461,14 @@ mod tests {
         mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
         mgr.bind(vec![step('a'), step('c'), step('y')], None, Action::Quit);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
-        assert!(mgr.process(Key::Char('c'), Modifiers::NONE, true, "").handled);
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
+        assert!(
+            mgr.process(Key::Char('c'), Modifiers::NONE, true, "")
+                .handled
+        );
 
         let miss = mgr.process(Key::Char('z'), Modifiers::NONE, true, "");
         assert!(!miss.handled);
@@ -463,9 +492,18 @@ mod tests {
         );
         mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
-        assert!(mgr.process(Key::Char('d'), Modifiers::NONE, true, "").handled);
-        assert!(mgr.process(Key::Char('d'), Modifiers::NONE, false, "").handled);
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
+        assert!(
+            mgr.process(Key::Char('d'), Modifiers::NONE, true, "")
+                .handled
+        );
+        assert!(
+            mgr.process(Key::Char('d'), Modifiers::NONE, false, "")
+                .handled
+        );
 
         let after = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
         assert!(!after.handled);
@@ -477,7 +515,10 @@ mod tests {
         mgr.register_layer(vec![step('a')], None, sticky(Some(5)));
         mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
         thread::sleep(Duration::from_millis(10));
 
         let after_timeout = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
@@ -490,20 +531,25 @@ mod tests {
         mgr.register_layer(vec![step('a')], None, sticky(Some(20)));
         mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
         thread::sleep(Duration::from_millis(15));
 
-        assert!(mgr
-            .process(Key::Char('x'), Modifiers::NONE, true, "")
-            .action
-            .is_some());
+        assert!(
+            mgr.process(Key::Char('x'), Modifiers::NONE, true, "")
+                .action
+                .is_some()
+        );
         thread::sleep(Duration::from_millis(15));
 
         // Still active because handled key reset timeout.
-        assert!(mgr
-            .process(Key::Char('x'), Modifiers::NONE, true, "")
-            .action
-            .is_some());
+        assert!(
+            mgr.process(Key::Char('x'), Modifiers::NONE, true, "")
+                .action
+                .is_some()
+        );
     }
 
     #[test]
@@ -512,7 +558,10 @@ mod tests {
         mgr.register_layer(vec![step('a')], None, sticky(Some(20)));
         mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
 
-        assert!(mgr.process(Key::Char('a'), Modifiers::NONE, true, "").handled);
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
         thread::sleep(Duration::from_millis(15));
 
         // Unhandled key-up should not reset layer timeout.
@@ -521,5 +570,14 @@ mod tests {
 
         let after_timeout = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
         assert!(!after_timeout.handled);
+    }
+    #[test]
+    fn up_only_event_executes_action() {
+        let mut mgr = HotkeyManager::new();
+        mgr.bind(vec![step('a')], None, Action::Reload);
+
+        // Simulate a key-up without a preceding key-down for 'a'.
+        let hit = mgr.process(Key::Char('a'), Modifiers::NONE, false, "");
+        assert!(matches!(hit.action, Some(Action::Reload)));
     }
 }

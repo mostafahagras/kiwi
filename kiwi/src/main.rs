@@ -8,8 +8,8 @@ pub mod manager;
 mod translate;
 pub mod window;
 
-use crate::cli::error::{CliError, CliResult};
 use crate::cli::LogArgs;
+use crate::cli::error::{CliError, CliResult};
 use crate::control::{ControlState, default_socket_path, spawn_control_server};
 use crate::input::{USER_DATA, from_cg_code, get_character_from_event};
 use crate::manager::RELOAD_REQUESTED;
@@ -43,7 +43,10 @@ fn main() {
     }
 }
 
-pub(crate) fn run_daemon(config_path_override: Option<PathBuf>, log_args: LogArgs) -> CliResult<()> {
+pub(crate) fn run_daemon(
+    config_path_override: Option<PathBuf>,
+    log_args: LogArgs,
+) -> CliResult<()> {
     init_tracing(log_args);
 
     if !a11y::is_process_trusted() {
@@ -57,8 +60,12 @@ pub(crate) fn run_daemon(config_path_override: Option<PathBuf>, log_args: LogArg
     let config_path = resolve_config_path(config_path_override)
         .map_err(|e| CliError::new(format!("configuration file not found: {e}")))?;
 
-    let config = parse_config_from_path(&config_path)
-        .map_err(|e| CliError::new(format!("failed to parse config {}: {e:?}", config_path.display())))?;
+    let config = parse_config_from_path(&config_path).map_err(|e| {
+        CliError::new(format!(
+            "failed to parse config {}: {e:?}",
+            config_path.display()
+        ))
+    })?;
 
     manager::init_action_executor();
 
@@ -162,7 +169,9 @@ pub(crate) fn run_daemon(config_path_override: Option<PathBuf>, log_args: LogArg
     Ok(())
 }
 
-pub(crate) fn resolve_config_path(override_path: Option<PathBuf>) -> Result<PathBuf, std::io::Error> {
+pub(crate) fn resolve_config_path(
+    override_path: Option<PathBuf>,
+) -> Result<PathBuf, std::io::Error> {
     let home = std::env::var("HOME").ok().map(PathBuf::from);
     let cwd = std::env::current_dir()?;
     resolve_config_path_inner(override_path, home, cwd)
