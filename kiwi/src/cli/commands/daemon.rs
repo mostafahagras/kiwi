@@ -1,5 +1,6 @@
 use crate::cli::error::{CliError, CliResult};
-use crate::cli::{DaemonArgs, DaemonCommand};
+use crate::cli::{DaemonArgs, DaemonCommand, LogArgs};
+use std::fs;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -10,24 +11,29 @@ pub fn run(args: DaemonArgs) -> CliResult<()> {
     let uid = current_uid()?;
     let domain = format!("gui/{uid}");
     let plist = args.plist.unwrap_or(default_plist_path()?);
+    let log_flags = to_log_flags(args.log);
 
     match args.command {
-        DaemonCommand::Start => start(&domain, &plist),
+        DaemonCommand::Start => start(&domain, &plist, &log_flags),
         DaemonCommand::Stop => stop(&domain, &plist),
         DaemonCommand::Restart => {
             stop(&domain, &plist)?;
-            start(&domain, &plist)
+            start(&domain, &plist, &log_flags)
         }
         DaemonCommand::Status => status(&domain),
     }
 }
 
-fn start(domain: &str, plist_path: &Path) -> CliResult<()> {
+fn start(domain: &str, plist_path: &Path, log_flags: &[&str]) -> CliResult<()> {
     if !plist_path.exists() {
         return Err(CliError::new(format!(
             "plist not found at {} (run `kiwi install` first or pass --plist)",
             plist_path.display()
         )));
+    }
+
+    if !log_flags.is_empty() {
+        update_plist_program_arguments(plist_path, log_flags)?;
     }
 
     let bootstrap = launchctl(["bootstrap", domain, path_to_str(plist_path)?])?;
@@ -152,4 +158,70 @@ fn default_plist_path() -> CliResult<PathBuf> {
 fn path_to_str(path: &Path) -> CliResult<&str> {
     path.to_str()
         .ok_or_else(|| CliError::new("path contains invalid UTF-8"))
+}
+
+fn to_log_flags(log: LogArgs) -> Vec<&'static str> {
+    if log.quiet {
+        return vec!["--quiet"];
+    }
+    if log.trace {
+        return vec!["--trace"];
+    }
+    if log.debug {
+        return vec!["--debug"];
+    }
+    Vec::new()
+}
+
+fn update_plist_program_arguments(plist_path: &Path, extra_args: &[&str]) -> CliResult<()> {
+    let contents = fs::read_to_string(plist_path).map_err(|e| {
+        CliError::new(format!(
+            "failed to read plist {}: {e}",
+            plist_path.display()
+        ))
+    })?;
+
+    let key_idx = contents
+        .find("<key>ProgramArguments</key>")
+        .ok_or_else(|| CliError::new("plist is missing ProgramArguments key"))?;
+    let array_start_rel = contents[key_idx..]
+        .find("<array>")
+        .ok_or_else(|| CliError::new("plist ProgramArguments is missing <array>"))?;
+    let array_start = key_idx + array_start_rel;
+    let array_end_rel = contents[array_start..]
+        .find("</array>")
+        .ok_or_else(|| CliError::new("plist ProgramArguments is missing </array>"))?;
+    let array_end = array_start + array_end_rel + "</array>".len();
+
+    let array_section = &contents[array_start..array_end];
+    let first_string_start_rel = array_section
+        .find("<string>")
+        .ok_or_else(|| CliError::new("plist ProgramArguments has no executable entry"))?;
+    let first_string_end_rel = array_section[first_string_start_rel + "<string>".len()..]
+        .find("</string>")
+        .ok_or_else(|| CliError::new("plist ProgramArguments executable entry is malformed"))?;
+    let first_string_value_start = first_string_start_rel + "<string>".len();
+    let exec = &array_section
+        [first_string_value_start..first_string_value_start + first_string_end_rel];
+
+    let mut new_array = String::from("<array><string>");
+    new_array.push_str(exec);
+    new_array.push_str("</string>");
+    for arg in extra_args {
+        new_array.push_str("<string>");
+        new_array.push_str(arg);
+        new_array.push_str("</string>");
+    }
+    new_array.push_str("</array>");
+
+    let mut updated = contents;
+    updated.replace_range(array_start..array_end, &new_array);
+    fs::write(plist_path, updated).map_err(|e| {
+        CliError::new(format!(
+            "failed to update plist {}: {e}",
+            plist_path.display()
+        ))
+    })?;
+
+    Ok(())
 }

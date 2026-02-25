@@ -9,6 +9,7 @@ mod translate;
 pub mod window;
 
 use crate::cli::error::{CliError, CliResult};
+use crate::cli::LogArgs;
 use crate::control::{ControlState, default_socket_path, spawn_control_server};
 use crate::input::{USER_DATA, from_cg_code, get_character_from_event};
 use crate::manager::RELOAD_REQUESTED;
@@ -31,7 +32,7 @@ fn main() {
 
     let result = match cli.command {
         Some(command) => cli::run(command),
-        None => run_daemon(None),
+        None => run_daemon(None, cli.log),
     };
 
     if let Err(err) = result {
@@ -42,8 +43,8 @@ fn main() {
     }
 }
 
-pub(crate) fn run_daemon(config_path_override: Option<PathBuf>) -> CliResult<()> {
-    init_tracing();
+pub(crate) fn run_daemon(config_path_override: Option<PathBuf>, log_args: LogArgs) -> CliResult<()> {
+    init_tracing(log_args);
 
     if !a11y::is_process_trusted() {
         return Err(CliError::new(
@@ -122,17 +123,17 @@ pub(crate) fn run_daemon(config_path_override: Option<PathBuf>) -> CliResult<()>
                 if RELOAD_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
                     info!("Reloading configuration...");
 
-RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+                    RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
                     match parse_config_from_path(&reload_path) {
                         Ok(new_config) => {
                             *mgr = manager::setup_manager(&new_config);
                             manager::clear_window_state();
-                                                        info!("Configuration reloaded.");
+                            info!("Configuration reloaded.");
                         }
                         Err(e) => {
                             error!("Failed to reload config:");
                             println!("{e:?}");
-                                                    }
+                        }
                     }
                 }
 
@@ -208,11 +209,17 @@ pub(crate) fn parse_config_from_path(path: &Path) -> Result<Config, Report> {
     kiwi_parser::parse_config(&toml_str, path.to_path_buf())
 }
 
-fn init_tracing() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .try_init();
+fn init_tracing(log_args: LogArgs) {
+    let env = if log_args.quiet {
+        tracing_subscriber::EnvFilter::new("error")
+    } else if log_args.trace {
+        tracing_subscriber::EnvFilter::new("trace")
+    } else if log_args.debug {
+        tracing_subscriber::EnvFilter::new("debug")
+    } else {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+    };
+
+    let _ = tracing_subscriber::fmt().with_env_filter(env).try_init();
 }

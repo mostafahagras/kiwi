@@ -11,6 +11,8 @@ use crate::cli::error::CliResult;
 #[derive(Debug, Parser)]
 #[command(name = "kiwi", version, about = "Keyboard shortcut daemon for macOS")]
 pub struct Cli {
+    #[command(flatten)]
+    pub log: LogArgs,
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -52,6 +54,8 @@ pub struct CheckArgs {
 
 #[derive(Debug, Args)]
 pub struct DaemonArgs {
+    #[command(flatten)]
+    pub log: LogArgs,
     #[command(subcommand)]
     pub command: DaemonCommand,
     /// LaunchAgent plist path override
@@ -168,6 +172,19 @@ pub enum LogStream {
     Both,
 }
 
+#[derive(Debug, Args, Clone, Copy, Default)]
+pub struct LogArgs {
+    /// Disable logging except for errors; takes precedence over --debug/--trace
+    #[arg(short = 'q', long = "quiet", global = true)]
+    pub quiet: bool,
+    /// Enable debug logging
+    #[arg(short = 'd', long = "debug", global = true)]
+    pub debug: bool,
+    /// Enable trace logging (implies --debug)
+    #[arg(short = 't', long = "trace", global = true)]
+    pub trace: bool,
+}
+
 #[derive(Debug, Args)]
 pub struct CompletionArgs {
     pub shell: Shell,
@@ -188,7 +205,7 @@ pub fn run(command: Commands) -> CliResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, CtlCommand, LayerCommand};
+    use super::{Cli, Commands, CtlCommand, DaemonCommand, LayerCommand};
     use clap::Parser;
 
     #[test]
@@ -275,5 +292,18 @@ mod tests {
     fn parse_completions_zsh() {
         let cli = Cli::try_parse_from(["kiwi", "completions", "zsh"]).expect("should parse");
         assert!(matches!(cli.command, Some(Commands::Completions(_))));
+    }
+
+    #[test]
+    fn parse_daemon_restart_with_trace() {
+        let cli = Cli::try_parse_from(["kiwi", "daemon", "restart", "--trace"])
+            .expect("should parse");
+        match cli.command {
+            Some(Commands::Daemon(args)) => {
+                assert!(args.log.trace);
+                assert!(matches!(args.command, DaemonCommand::Restart));
+            }
+            _ => panic!("expected daemon command"),
+        }
     }
 }

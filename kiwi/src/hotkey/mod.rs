@@ -32,7 +32,7 @@ impl HotkeyStep {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LayerBehavior {
     pub name: Option<String>,
     pub mode: LayerMode,
@@ -40,7 +40,7 @@ pub struct LayerBehavior {
     pub deactivate: Option<HotkeyStep>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HotkeyNode {
     pub action: Option<Action>,
     pub context: Option<String>,
@@ -171,7 +171,9 @@ impl HotkeyManager {
 
     fn lookup_in_scope(&self, path: &[HotkeyStep], step: &HotkeyStep, current_app: &str) -> Option<LookupHit> {
         let scope = self.node_for_path(path)?;
+        // println!("{:?}", scope.children);
         let node = scope.children.get(step)?;
+        println!("{:?}", node);
 
         if let Some(ctx) = &node.context
             && ctx != current_app

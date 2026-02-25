@@ -38,6 +38,8 @@ Common commands:
 kiwi install     # alias: kiwi i
 kiwi update [--path /path/to/kiwi]
 kiwi daemon start|stop|restart|status [--plist /path/to/com.example.kiwi.plist]
+kiwi daemon restart --debug
+kiwi daemon start --quiet
 kiwi check [--config /path/to/config.toml]
 kiwi config path
 kiwi config init [--force]
@@ -49,6 +51,17 @@ kiwi ctl send "cmd+k" "shift+l"
 kiwi ctl press "cmd+k"
 kiwi ctl exec "resize:DecreaseWidth"
 ```
+
+Logging flags:
+
+```bash
+kiwi --quiet
+kiwi --debug
+kiwi --trace
+```
+
+Precedence is: `--quiet` > `--trace` > `--debug`.
+You can also pass these flags to `kiwi daemon start|restart` to persist logging args in the LaunchAgent plist.
 
 Install entrypoint:
 
