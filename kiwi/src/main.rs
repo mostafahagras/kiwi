@@ -122,17 +122,17 @@ pub(crate) fn run_daemon(config_path_override: Option<PathBuf>) -> CliResult<()>
                 if RELOAD_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
                     info!("Reloading configuration...");
 
+RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
                     match parse_config_from_path(&reload_path) {
                         Ok(new_config) => {
                             *mgr = manager::setup_manager(&new_config);
                             manager::clear_window_state();
-                            RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
-                            info!("Configuration reloaded.");
+                                                        info!("Configuration reloaded.");
                         }
                         Err(e) => {
-                            error!("Failed to reload config: {e:?}");
-                            process::exit(1);
-                        }
+                            error!("Failed to reload config:");
+                            println!("{e:?}");
+                                                    }
                     }
                 }
 
