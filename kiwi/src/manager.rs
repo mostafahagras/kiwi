@@ -7,12 +7,13 @@ use std::sync::mpsc::{self, Sender};
 use tracing::{debug, error, info};
 
 use core_graphics_types::geometry::CGRect;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static WINDOW_STATE: OnceLock<Mutex<HashMap<u32, CGRect>>> = OnceLock::new();
 const WINDOW_STATE_MAX_ENTRIES: usize = 256;
 static ACTION_SENDER: OnceLock<Sender<Action>> = OnceLock::new();
+static ACTION_QUEUE_DEPTH: AtomicUsize = AtomicUsize::new(0);
 static INTERCEPT_MODE: OnceLock<Mutex<Option<InterceptMode>>> = OnceLock::new();
 
 fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
@@ -20,6 +21,13 @@ fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
 }
 
 pub static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy)]
+pub enum InterceptState {
+    None,
+    Pass,
+    Swallow,
+}
 
 #[derive(Clone, Copy)]
 enum InterceptKind {
@@ -97,6 +105,7 @@ pub fn init_action_executor() {
         .name("kiwi-action-executor".into())
         .spawn(move || {
             while let Ok(action) = rx.recv() {
+                ACTION_QUEUE_DEPTH.fetch_sub(1, Ordering::SeqCst);
                 handle_action(&action);
             }
         })
@@ -107,7 +116,9 @@ pub fn init_action_executor() {
 
 pub fn dispatch_action(action: Action) {
     if let Some(tx) = ACTION_SENDER.get() {
+        ACTION_QUEUE_DEPTH.fetch_add(1, Ordering::SeqCst);
         if let Err(e) = tx.send(action) {
+            ACTION_QUEUE_DEPTH.fetch_sub(1, Ordering::SeqCst);
             error!("Failed to enqueue action: {}", e);
         }
     } else {
@@ -119,6 +130,22 @@ pub fn dispatch_action(action: Action) {
 pub fn clear_window_state() {
     if let Ok(mut state) = get_window_state().lock() {
         state.clear();
+    }
+}
+
+pub fn action_queue_depth() -> usize {
+    ACTION_QUEUE_DEPTH.load(Ordering::SeqCst)
+}
+
+pub fn intercept_state() -> InterceptState {
+    let Ok(guard) = get_intercept_mode().lock() else {
+        return InterceptState::None;
+    };
+
+    match guard.as_ref().map(|m| m.kind) {
+        Some(InterceptKind::Pass) => InterceptState::Pass,
+        Some(InterceptKind::Swallow) => InterceptState::Swallow,
+        None => InterceptState::None,
     }
 }
 
@@ -194,6 +221,49 @@ pub fn handle_action(action: &Action) {
         _ => {
             error!("Action not yet fully implemented: {:?}", action);
         }
+    }
+}
+
+pub struct InjectOutcome {
+    pub handled: bool,
+    pub dispatched_actions: usize,
+}
+
+pub fn process_injected_binding(
+    manager: &mut HotkeyManager,
+    binding: &KeyBinding,
+    app_name: &str,
+) -> InjectOutcome {
+    let mut handled = false;
+    let mut dispatched_actions = 0;
+
+    match intercept_decision(&binding.key, binding.modifiers, true) {
+        InterceptDecision::ProcessNormally => {
+            let down = manager.process(binding.key.clone(), binding.modifiers, true, app_name);
+            handled |= down.handled;
+            if let Some(action) = down.action {
+                dispatch_action(action);
+                dispatched_actions += 1;
+            }
+        }
+        InterceptDecision::KeepWithoutProcessing | InterceptDecision::DropWithoutProcessing => {}
+    }
+
+    match intercept_decision(&binding.key, binding.modifiers, false) {
+        InterceptDecision::ProcessNormally => {
+            let up = manager.process(binding.key.clone(), binding.modifiers, false, app_name);
+            handled |= up.handled;
+            if let Some(action) = up.action {
+                dispatch_action(action);
+                dispatched_actions += 1;
+            }
+        }
+        InterceptDecision::KeepWithoutProcessing | InterceptDecision::DropWithoutProcessing => {}
+    }
+
+    InjectOutcome {
+        handled,
+        dispatched_actions,
     }
 }
 
@@ -493,7 +563,7 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
 
     // 2. Layers
     for (trigger, layer) in &config.layers {
-        register_layer(&mut manager, Vec::new(), None, trigger, layer);
+        register_layer(&mut manager, Vec::new(), None, String::new(), trigger, layer);
     }
 
     // 3. Apps
@@ -512,6 +582,7 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
                 &mut manager,
                 Vec::new(),
                 Some(app_name.clone()),
+                format!("app:{app_name}"),
                 trigger,
                 layer,
             );
@@ -525,13 +596,21 @@ fn register_layer(
     manager: &mut HotkeyManager,
     prefix: Vec<HotkeyStep>,
     context: Option<String>,
+    name_prefix: String,
     trigger: &KeyBinding,
     layer: &Layer,
 ) {
     let mut layer_prefix = prefix;
     layer_prefix.push(HotkeyStep::new(trigger.key.clone(), trigger.modifiers));
 
+    let layer_name = if name_prefix.is_empty() {
+        layer.name.clone()
+    } else {
+        format!("{}.{}", name_prefix, layer.name)
+    };
+
     let behavior = LayerBehavior {
+        name: Some(layer_name.clone()),
         mode: layer.mode,
         timeout_ms: layer.timeout,
         deactivate: layer
@@ -554,6 +633,7 @@ fn register_layer(
             manager,
             layer_prefix.clone(),
             context.clone(),
+            layer_name.clone(),
             trigger,
             child_layer,
         );

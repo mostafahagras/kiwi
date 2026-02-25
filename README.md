@@ -43,6 +43,11 @@ kiwi config path
 kiwi config init [--force]
 kiwi logs path
 kiwi logs tail [--stream stdout|stderr|both] [--lines 100]
+kiwi ctl status|reload|quit|version|config-path
+kiwi ctl layer list|active|activate <name|root>
+kiwi ctl send "cmd+k" "shift+l"
+kiwi ctl press "cmd+k"
+kiwi ctl exec "resize:DecreaseWidth"
 ```
 
 Install entrypoint:
@@ -54,6 +59,35 @@ kiwi install
 ```
 
 This runs the macOS bundle/launch-agent installer flow from `kiwi/src/package.rs`.
+
+`kiwi ctl` talks to the running daemon over a local socket at `~/.kiwi/kiwi.sock`.
+
+## Shell Completions
+
+Generate completion scripts with:
+
+```bash
+kiwi completions zsh
+kiwi completions bash
+kiwi completions fish
+kiwi completions elvish
+kiwi completions powershell
+```
+
+Install examples:
+
+```bash
+# zsh
+mkdir -p ~/.zsh/completions
+kiwi completions zsh > ~/.zsh/completions/_kiwi
+
+# bash
+kiwi completions bash > ~/.local/share/bash-completion/completions/kiwi
+
+# fish
+mkdir -p ~/.config/fish/completions
+kiwi completions fish > ~/.config/fish/completions/kiwi.fish
+```
 
 ## Config File Resolution
 

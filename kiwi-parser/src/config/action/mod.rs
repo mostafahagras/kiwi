@@ -2,8 +2,9 @@ pub mod resize;
 pub mod snap;
 
 use crate::config::{ValidationContext, binding::parse_keybinding, error::ConfigError};
-use crate::key::KeyBinding;
-use miette::SourceSpan;
+use crate::key::{KeyBinding, Modifiers};
+use miette::{NamedSource, SourceSpan};
+use std::collections::HashMap;
 pub use resize::Resize;
 pub use snap::Snap;
 use std::time::{Duration, Instant};
@@ -149,4 +150,26 @@ fn parse_single_action_string(
             _ => Some(Action::Shell(trimmed.to_string())),
         }
     }
+}
+
+pub fn parse_action_str(raw: &str) -> Result<Action, String> {
+    let src = NamedSource::new("ctl-action", raw.to_string());
+    let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+    let ctx = ValidationContext {
+        src: &src,
+        modifier_map: &modifier_map,
+        modifier_names: Vec::new(),
+        app_aliases: HashMap::new(),
+    };
+
+    let mut errors = Vec::new();
+    let span = SourceSpan::new(0.into(), raw.len());
+    let action = parse_single_action_string(raw, span, &mut errors, &ctx)
+        .ok_or_else(|| "invalid action".to_string())?;
+
+    if let Some(err) = errors.first() {
+        return Err(format!("{err}"));
+    }
+
+    Ok(action)
 }

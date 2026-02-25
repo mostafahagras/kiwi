@@ -34,6 +34,7 @@ impl HotkeyStep {
 
 #[derive(Clone)]
 pub struct LayerBehavior {
+    pub name: Option<String>,
     pub mode: LayerMode,
     pub timeout_ms: Option<u32>,
     pub deactivate: Option<HotkeyStep>,
@@ -66,9 +67,17 @@ impl Default for HotkeyNode {
 
 #[derive(Clone)]
 struct ActiveLayer {
+    name: Option<String>,
     path: Vec<HotkeyStep>,
     behavior: LayerBehavior,
     deadline: Option<Instant>,
+}
+
+#[derive(Clone)]
+struct LayerRegistration {
+    context: Option<String>,
+    path: Vec<HotkeyStep>,
+    behavior: LayerBehavior,
 }
 
 struct LookupHit {
@@ -83,6 +92,7 @@ pub struct HotkeyManager {
     active_layers: Vec<ActiveLayer>,
     active_activations: HashSet<HotkeyStep>,
     pending_deactivate_release: Option<HotkeyStep>,
+    layer_registry: HashMap<String, LayerRegistration>,
 }
 
 pub struct ProcessResult {
@@ -113,6 +123,7 @@ impl HotkeyManager {
             active_layers: Vec::new(),
             active_activations: HashSet::new(),
             pending_deactivate_release: None,
+            layer_registry: HashMap::new(),
         }
     }
 
@@ -132,11 +143,22 @@ impl HotkeyManager {
         behavior: LayerBehavior,
     ) {
         let mut node = &mut self.root;
-        for step in sequence {
-            node = node.children.entry(step).or_default();
+        for step in &sequence {
+            node = node.children.entry(step.clone()).or_default();
         }
-        node.context = context;
-        node.layer_behavior = Some(behavior);
+        node.context = context.clone();
+        node.layer_behavior = Some(behavior.clone());
+
+        if let Some(name) = &behavior.name {
+            self.layer_registry.insert(
+                name.clone(),
+                LayerRegistration {
+                    context,
+                    path: sequence,
+                    behavior,
+                },
+            );
+        }
     }
 
     fn node_for_path(&self, path: &[HotkeyStep]) -> Option<&HotkeyNode> {
@@ -252,6 +274,7 @@ impl HotkeyManager {
             }
 
             let child = ActiveLayer {
+                name: layer_behavior.name.clone(),
                 path: hit.full_path,
                 deadline: Self::deadline_from_timeout(layer_behavior.timeout_ms),
                 behavior: layer_behavior,
@@ -280,6 +303,49 @@ impl HotkeyManager {
 
         ProcessResult::consume(None)
     }
+
+    pub fn registered_layer_names(&self) -> Vec<String> {
+        let mut names: Vec<_> = self.layer_registry.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    pub fn active_layer_names(&self) -> Vec<String> {
+        self.active_layers
+            .iter()
+            .filter_map(|frame| frame.name.clone())
+            .collect()
+    }
+
+    pub fn activate_layer(&mut self, name: &str, current_app: &str) -> Result<(), String> {
+        let registration = self
+            .layer_registry
+            .get(name)
+            .ok_or_else(|| format!("unknown layer: {name}"))?
+            .clone();
+
+        if let Some(ctx) = &registration.context
+            && ctx != current_app
+        {
+            return Err(format!("layer '{name}' is scoped to app '{ctx}'"));
+        }
+
+        if !self.active_layers.is_empty() {
+            self.reset_top_deadline();
+        }
+
+        self.active_layers.push(ActiveLayer {
+            name: registration.behavior.name.clone(),
+            path: registration.path,
+            deadline: Self::deadline_from_timeout(registration.behavior.timeout_ms),
+            behavior: registration.behavior,
+        });
+        Ok(())
+    }
+
+    pub fn clear_active_layers(&mut self) {
+        self.active_layers.clear();
+    }
 }
 
 impl Default for HotkeyManager {
@@ -301,6 +367,7 @@ mod tests {
 
     fn sticky(timeout: Option<u32>) -> LayerBehavior {
         LayerBehavior {
+            name: None,
             mode: LayerMode::Sticky,
             timeout_ms: timeout,
             deactivate: None,
@@ -309,6 +376,7 @@ mod tests {
 
     fn oneshot(timeout: Option<u32>) -> LayerBehavior {
         LayerBehavior {
+            name: None,
             mode: LayerMode::Oneshot,
             timeout_ms: timeout,
             deactivate: None,
@@ -385,6 +453,7 @@ mod tests {
             vec![step('a')],
             None,
             LayerBehavior {
+                name: None,
                 mode: LayerMode::Sticky,
                 timeout_ms: None,
                 deactivate: Some(step('d')),

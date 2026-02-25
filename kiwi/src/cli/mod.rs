@@ -2,9 +2,10 @@ pub mod commands;
 pub mod error;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use std::path::PathBuf;
 
-use crate::cli::commands::{check, config, daemon, install, logs, update};
+use crate::cli::commands::{check, completions, config, ctl, daemon, install, logs, update};
 use crate::cli::error::CliResult;
 
 #[derive(Debug, Parser)]
@@ -23,12 +24,16 @@ pub enum Commands {
     Update(UpdateArgs),
     /// Control Kiwi launch agent
     Daemon(DaemonArgs),
+    /// Control a running Kiwi daemon via local IPC
+    Ctl(CtlArgs),
     /// Validate configuration and exit
     Check(CheckArgs),
     /// Config helpers
     Config(ConfigArgs),
     /// Log helpers
     Logs(LogsArgs),
+    /// Generate shell completion scripts
+    Completions(CompletionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -60,6 +65,55 @@ pub enum DaemonCommand {
     Stop,
     Restart,
     Status,
+}
+
+#[derive(Debug, Args)]
+pub struct CtlArgs {
+    /// Control socket path override
+    #[arg(long, global = true)]
+    pub socket: Option<PathBuf>,
+    /// Emit raw JSON response
+    #[arg(long, global = true)]
+    pub json: bool,
+    #[command(subcommand)]
+    pub command: CtlCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CtlCommand {
+    Ping,
+    Status,
+    Reload,
+    Quit,
+    ConfigPath,
+    Version,
+    Layer(LayerArgs),
+    Send(BindingsArgs),
+    Press(BindingsArgs),
+    Exec(ExecArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct LayerArgs {
+    #[command(subcommand)]
+    pub command: LayerCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LayerCommand {
+    List,
+    Active,
+    Activate { layer: String },
+}
+
+#[derive(Debug, Args)]
+pub struct BindingsArgs {
+    pub bindings: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ExecArgs {
+    pub action: String,
 }
 
 #[derive(Debug, Args)]
@@ -114,13 +168,112 @@ pub enum LogStream {
     Both,
 }
 
+#[derive(Debug, Args)]
+pub struct CompletionArgs {
+    pub shell: Shell,
+}
+
 pub fn run(command: Commands) -> CliResult<()> {
     match command {
         Commands::Install => install::run(),
         Commands::Update(args) => update::run(args),
         Commands::Daemon(args) => daemon::run(args),
+        Commands::Ctl(args) => ctl::run(args),
         Commands::Check(args) => check::run(args),
         Commands::Config(args) => config::run(args),
         Commands::Logs(args) => logs::run(args),
+        Commands::Completions(args) => completions::run(args),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands, CtlCommand, LayerCommand};
+    use clap::Parser;
+
+    #[test]
+    fn parse_ctl_send_single_binding() {
+        let cli = Cli::try_parse_from(["kiwi", "ctl", "send", "cmd+k"]).expect("should parse");
+        match cli.command {
+            Some(Commands::Ctl(args)) => match args.command {
+                CtlCommand::Send(bindings) => assert_eq!(bindings.bindings, vec!["cmd+k"]),
+                _ => panic!("expected ctl send"),
+            },
+            _ => panic!("expected ctl command"),
+        }
+    }
+
+    #[test]
+    fn parse_ctl_send_multiple_bindings() {
+        let cli =
+            Cli::try_parse_from(["kiwi", "ctl", "send", "cmd+k", "shift+l"]).expect("should parse");
+        match cli.command {
+            Some(Commands::Ctl(args)) => match args.command {
+                CtlCommand::Send(bindings) => {
+                    assert_eq!(bindings.bindings, vec!["cmd+k", "shift+l"])
+                }
+                _ => panic!("expected ctl send"),
+            },
+            _ => panic!("expected ctl command"),
+        }
+    }
+
+    #[test]
+    fn parse_ctl_press() {
+        let cli = Cli::try_parse_from(["kiwi", "ctl", "press", "cmd+k"]).expect("should parse");
+        match cli.command {
+            Some(Commands::Ctl(args)) => match args.command {
+                CtlCommand::Press(bindings) => assert_eq!(bindings.bindings, vec!["cmd+k"]),
+                _ => panic!("expected ctl press"),
+            },
+            _ => panic!("expected ctl command"),
+        }
+    }
+
+    #[test]
+    fn parse_ctl_exec() {
+        let cli =
+            Cli::try_parse_from(["kiwi", "ctl", "exec", "snap:LeftHalf"]).expect("should parse");
+        match cli.command {
+            Some(Commands::Ctl(args)) => match args.command {
+                CtlCommand::Exec(exec) => assert_eq!(exec.action, "snap:LeftHalf"),
+                _ => panic!("expected ctl exec"),
+            },
+            _ => panic!("expected ctl command"),
+        }
+    }
+
+    #[test]
+    fn parse_ctl_layer_activate_root() {
+        let cli = Cli::try_parse_from(["kiwi", "ctl", "layer", "activate", "root"])
+            .expect("should parse");
+        match cli.command {
+            Some(Commands::Ctl(args)) => match args.command {
+                CtlCommand::Layer(layer_args) => match layer_args.command {
+                    LayerCommand::Activate { layer } => assert_eq!(layer, "root"),
+                    _ => panic!("expected layer activate"),
+                },
+                _ => panic!("expected ctl layer"),
+            },
+            _ => panic!("expected ctl command"),
+        }
+    }
+
+    #[test]
+    fn parse_ctl_json_after_subcommand() {
+        let cli = Cli::try_parse_from(["kiwi", "ctl", "status", "--json"]).expect("should parse");
+        match cli.command {
+            Some(Commands::Ctl(args)) => {
+                assert!(args.json);
+                assert!(matches!(args.command, CtlCommand::Status));
+            }
+            _ => panic!("expected ctl command"),
+        }
+    }
+
+    #[test]
+    fn parse_completions_zsh() {
+        let cli = Cli::try_parse_from(["kiwi", "completions", "zsh"]).expect("should parse");
+        assert!(matches!(cli.command, Some(Commands::Completions(_))));
     }
 }

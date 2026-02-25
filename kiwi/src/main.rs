@@ -1,5 +1,6 @@
 pub mod a11y;
 pub mod cli;
+mod control;
 pub mod ffi;
 pub mod hotkey;
 pub mod input;
@@ -8,6 +9,7 @@ mod translate;
 pub mod window;
 
 use crate::cli::error::{CliError, CliResult};
+use crate::control::{ControlState, default_socket_path, spawn_control_server};
 use crate::input::{USER_DATA, from_cg_code, get_character_from_event};
 use crate::manager::RELOAD_REQUESTED;
 use crate::window::focused::init_focus_observer;
@@ -68,6 +70,14 @@ pub(crate) fn run_daemon(config_path_override: Option<PathBuf>) -> CliResult<()>
     let manager = Arc::new(Mutex::new(manager));
     let manager_ref = manager.clone();
     let reload_path = config_path.clone();
+
+    let control_state = ControlState {
+        manager: manager.clone(),
+        config_path: config_path.clone(),
+        started_at: std::time::Instant::now(),
+        socket_path: default_socket_path()?,
+    };
+    spawn_control_server(control_state)?;
 
     let tap = CGEventTap::new(
         CGEventTapLocation::HID,

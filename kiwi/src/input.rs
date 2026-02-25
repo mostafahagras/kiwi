@@ -72,7 +72,7 @@ pub fn send_key_combination(combo: &KeyBinding) {
     }
 
     // Sufficient duration for the app to register the key down
-    std::thread::sleep(Duration::from_millis(30));
+    std::thread::sleep(Duration::from_millis(10));
 
     // Key Up
     if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), keycode, false) {
