@@ -55,7 +55,7 @@ pub fn resize_focused_window(width: f64, height: f64) -> bool {
 }
 
 pub fn set_focused_window_bounds(x: f64, y: f64, width: f64, height: f64) -> bool {
-    move_focused_window(x.max(0.0), y.max(0.0)) && resize_focused_window(width.max(0.0), height.max(0.0))
+    move_focused_window(x, y) && resize_focused_window(width.max(0.0), height.max(0.0))
 }
 
 pub fn toggle_native_fullscreen() -> bool {
