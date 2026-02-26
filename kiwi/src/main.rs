@@ -74,7 +74,12 @@ pub(crate) fn run_daemon(
         translate::set_layout(layout_id);
     }
 
-    let manager = manager::setup_manager(&config);
+    let manager = manager::setup_manager(&config).map_err(|e| {
+        CliError::new(format!(
+            "failed to build hotkey manager from {}: {e}",
+            config_path.display()
+        ))
+    })?;
     let manager = Arc::new(Mutex::new(manager));
     let manager_ref = manager.clone();
     let reload_path = config_path.clone();
@@ -132,11 +137,16 @@ pub(crate) fn run_daemon(
 
                     RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
                     match parse_config_from_path(&reload_path) {
-                        Ok(new_config) => {
-                            *mgr = manager::setup_manager(&new_config);
-                            manager::clear_window_state();
-                            info!("Configuration reloaded.");
-                        }
+                        Ok(new_config) => match manager::setup_manager(&new_config) {
+                            Ok(new_manager) => {
+                                *mgr = new_manager;
+                                manager::clear_window_state();
+                                info!("Configuration reloaded.");
+                            }
+                            Err(e) => {
+                                error!("Failed to build manager from reloaded config: {e}");
+                            }
+                        },
                         Err(e) => {
                             error!("Failed to reload config:");
                             println!("{e:?}");

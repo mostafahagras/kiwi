@@ -48,18 +48,20 @@ pub struct LayerBehavior {
 
 #[derive(Clone, Debug)]
 pub struct HotkeyNode {
-    pub action: Option<Action>,
-    pub context: Option<String>,
-    pub layer_behavior: Option<LayerBehavior>,
+    pub global_action: Option<Action>,
+    pub app_actions: HashMap<String, Action>,
+    pub global_layer_behavior: Option<LayerBehavior>,
+    pub app_layer_behaviors: HashMap<String, LayerBehavior>,
     pub children: HashMap<HotkeyStep, HotkeyNode>,
 }
 
 impl HotkeyNode {
     pub fn new() -> Self {
         Self {
-            action: None,
-            context: None,
-            layer_behavior: None,
+            global_action: None,
+            app_actions: HashMap::new(),
+            global_layer_behavior: None,
+            app_layer_behaviors: HashMap::new(),
             children: HashMap::new(),
         }
     }
@@ -74,6 +76,7 @@ impl Default for HotkeyNode {
 #[derive(Clone)]
 struct ActiveLayer {
     name: Option<String>,
+    context: Option<String>,
     path: Vec<HotkeyStep>,
     behavior: LayerBehavior,
     deadline: Option<Instant>,
@@ -90,6 +93,7 @@ struct LookupHit {
     full_path: Vec<HotkeyStep>,
     action: Option<Action>,
     layer_behavior: Option<LayerBehavior>,
+    context: Option<String>,
 }
 
 #[derive(Clone)]
@@ -97,8 +101,10 @@ pub struct HotkeyManager {
     root: HotkeyNode,
     active_layers: Vec<ActiveLayer>,
     active_activations: HashSet<HotkeyStep>,
+    observed_downs: HashSet<HotkeyStep>,
     pending_deactivate_release: Option<HotkeyStep>,
     layer_registry: HashMap<String, LayerRegistration>,
+    last_app: Option<String>,
 }
 
 pub struct ProcessResult {
@@ -128,8 +134,10 @@ impl HotkeyManager {
             root: HotkeyNode::new(),
             active_layers: Vec::new(),
             active_activations: HashSet::new(),
+            observed_downs: HashSet::new(),
             pending_deactivate_release: None,
             layer_registry: HashMap::new(),
+            last_app: None,
         }
     }
 
@@ -138,8 +146,14 @@ impl HotkeyManager {
         for step in sequence {
             node = node.children.entry(step).or_default();
         }
-        node.action = Some(action);
-        node.context = context;
+        match context {
+            Some(app) => {
+                node.app_actions.insert(app, action);
+            }
+            None => {
+                node.global_action = Some(action);
+            }
+        }
     }
 
     pub fn register_layer(
@@ -152,8 +166,14 @@ impl HotkeyManager {
         for step in &sequence {
             node = node.children.entry(step.clone()).or_default();
         }
-        node.context = context.clone();
-        node.layer_behavior = Some(behavior.clone());
+        match context.clone() {
+            Some(app) => {
+                node.app_layer_behaviors.insert(app, behavior.clone());
+            }
+            None => {
+                node.global_layer_behavior = Some(behavior.clone());
+            }
+        }
 
         if let Some(name) = &behavior.name {
             self.layer_registry.insert(
@@ -184,20 +204,63 @@ impl HotkeyManager {
         let scope = self.node_for_path(path)?;
         let node = scope.children.get(step)?;
 
-        if let Some(ctx) = &node.context
-            && ctx != current_app
-        {
-            return None;
-        }
-
         let mut full_path = path.to_vec();
         full_path.push(step.clone());
 
-        Some(LookupHit {
-            full_path,
-            action: node.action.clone(),
-            layer_behavior: node.layer_behavior.clone(),
-        })
+        if let Some(layer_behavior) = node.app_layer_behaviors.get(current_app).cloned() {
+            return Some(LookupHit {
+                full_path,
+                action: None,
+                layer_behavior: Some(layer_behavior),
+                context: Some(current_app.to_string()),
+            });
+        }
+
+        if let Some(action) = node.app_actions.get(current_app).cloned() {
+            return Some(LookupHit {
+                full_path,
+                action: Some(action),
+                layer_behavior: None,
+                context: None,
+            });
+        }
+
+        if let Some(layer_behavior) = node.global_layer_behavior.clone() {
+            return Some(LookupHit {
+                full_path,
+                action: None,
+                layer_behavior: Some(layer_behavior),
+                context: None,
+            });
+        }
+
+        if let Some(action) = node.global_action.clone() {
+            return Some(LookupHit {
+                full_path,
+                action: Some(action),
+                layer_behavior: None,
+                context: None,
+            });
+        }
+
+        None
+    }
+
+    fn sync_app_context(&mut self, current_app: &str) {
+        if self.last_app.as_deref() == Some(current_app) {
+            return;
+        }
+
+        if let Some(idx) = self
+            .active_layers
+            .iter()
+            .position(|frame| matches!(&frame.context, Some(ctx) if ctx != current_app))
+        {
+            self.active_layers.truncate(idx);
+            self.pending_deactivate_release = None;
+        }
+
+        self.last_app = Some(current_app.to_string());
     }
 
     fn deadline_from_timeout(timeout_ms: Option<u32>) -> Option<Instant> {
@@ -235,6 +298,13 @@ impl HotkeyManager {
     ) -> ProcessResult {
         let step = HotkeyStep { key, modifiers };
         trace!("[{current_app}] {} {step}", if is_down { "↓" } else { "↑" });
+        self.sync_app_context(current_app);
+        let had_observed_down = if is_down {
+            self.observed_downs.insert(step.clone());
+            false
+        } else {
+            self.observed_downs.remove(&step)
+        };
 
         if !is_down {
             if self.pending_deactivate_release.as_ref() == Some(&step) {
@@ -259,19 +329,24 @@ impl HotkeyManager {
             return ProcessResult::consume(None);
         }
 
-        let depth = self.active_layers.len();
-        let scope_path = self
-            .active_layers
-            .last()
-            .map(|layer| layer.path.clone())
-            .unwrap_or_default();
+        let (depth, hit) = loop {
+            let depth = self.active_layers.len();
+            let scope_path = self
+                .active_layers
+                .last()
+                .map(|layer| layer.path.clone())
+                .unwrap_or_default();
 
-        let Some(hit) = self.lookup_in_scope(&scope_path, &step, current_app) else {
-            if depth > 0 && is_down {
-                // Miss while a layer is active always pops only one frame.
-                // We only do this on keydown to avoid double-popping if keyup also misses.
-                self.active_layers.pop();
+            if let Some(hit) = self.lookup_in_scope(&scope_path, &step, current_app) {
+                break (depth, hit);
             }
+
+            if is_down && depth > 0 {
+                // Same-event fallback: pop one frame and retry from parent/root.
+                self.active_layers.pop();
+                continue;
+            }
+
             return ProcessResult::keep();
         };
 
@@ -280,6 +355,12 @@ impl HotkeyManager {
         }
 
         if let Some(layer_behavior) = hit.layer_behavior {
+            // We allow key-up activation only when there was no observed key-down
+            // for this chord (some event taps report key-up-only for certain combos).
+            if !is_down && had_observed_down {
+                return ProcessResult::keep();
+            }
+
             debug!("Entering layer: {:?}", hit.full_path);
 
             // Entering a child layer counts as handled activity in the parent layer.
@@ -289,6 +370,7 @@ impl HotkeyManager {
 
             let child = ActiveLayer {
                 name: layer_behavior.name.clone(),
+                context: hit.context,
                 path: hit.full_path,
                 deadline: Self::deadline_from_timeout(layer_behavior.timeout_ms),
                 behavior: layer_behavior,
@@ -350,6 +432,7 @@ impl HotkeyManager {
 
         self.active_layers.push(ActiveLayer {
             name: registration.behavior.name.clone(),
+            context: registration.context.clone(),
             path: registration.path,
             deadline: Self::deadline_from_timeout(registration.behavior.timeout_ms),
             behavior: registration.behavior,
@@ -454,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_miss_returns_to_parent() {
+    fn nested_miss_exits_layers_when_no_ancestor_matches() {
         let mut mgr = HotkeyManager::new();
         mgr.register_layer(vec![step('a')], None, sticky(None));
         mgr.register_layer(vec![step('a'), step('c')], None, sticky(None));
@@ -474,7 +557,7 @@ mod tests {
         assert!(!miss.handled);
 
         let parent_hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
-        assert!(matches!(parent_hit.action, Some(Action::Reload)));
+        assert!(!parent_hit.handled);
     }
 
     #[test]
@@ -579,5 +662,204 @@ mod tests {
         // Simulate a key-up without a preceding key-down for 'a'.
         let hit = mgr.process(Key::Char('a'), Modifiers::NONE, false, "");
         assert!(matches!(hit.action, Some(Action::Reload)));
+    }
+
+    #[test]
+    fn app_layer_activation_shadows_global_only_in_that_app() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('a')],
+            None,
+            LayerBehavior {
+                name: Some("global".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+
+        mgr.register_layer(
+            vec![step('a')],
+            Some("Chrome".to_string()),
+            LayerBehavior {
+                name: Some("app".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.bind(
+            vec![step('a'), step('x')],
+            Some("Chrome".to_string()),
+            Action::Quit,
+        );
+
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "Chrome")
+                .handled
+        );
+        let app_hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "Chrome");
+        assert!(matches!(app_hit.action, Some(Action::Quit)));
+
+        mgr.clear_active_layers();
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "Terminal")
+                .handled
+        );
+        let global_hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "Terminal");
+        assert!(matches!(global_hit.action, Some(Action::Reload)));
+    }
+
+    #[test]
+    fn app_binding_shadows_global_layer_only_in_that_app() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('a')],
+            None,
+            LayerBehavior {
+                name: Some("global".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+        mgr.bind(vec![step('a')], Some("Chrome".to_string()), Action::Quit);
+
+        let app_hit = mgr.process(Key::Char('a'), Modifiers::NONE, true, "Chrome");
+        assert!(matches!(app_hit.action, Some(Action::Quit)));
+
+        mgr.clear_active_layers();
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "Terminal")
+                .handled
+        );
+        let global_hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "Terminal");
+        assert!(matches!(global_hit.action, Some(Action::Reload)));
+    }
+
+    #[test]
+    fn repeated_activation_key_does_not_reactivate_on_key_up() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('l')], None, oneshot(None));
+
+        let first_down = mgr.process(Key::Char('l'), Modifiers::NONE, true, "");
+        assert!(first_down.handled);
+        let first_up = mgr.process(Key::Char('l'), Modifiers::NONE, false, "");
+        assert!(first_up.handled);
+
+        let second_down = mgr.process(Key::Char('l'), Modifiers::NONE, true, "");
+        assert!(second_down.handled);
+        let second_up = mgr.process(Key::Char('l'), Modifiers::NONE, false, "");
+        assert!(second_up.handled);
+    }
+
+    #[test]
+    fn keyup_only_can_still_activate_layer() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('l')], None, oneshot(None));
+        mgr.bind(vec![step('l'), step('x')], None, Action::Reload);
+
+        let up_only = mgr.process(Key::Char('l'), Modifiers::NONE, false, "");
+        assert!(up_only.handled);
+        let hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(matches!(hit.action, Some(Action::Reload)));
+    }
+
+    #[test]
+    fn app_switch_purges_app_scoped_active_layer() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('t')],
+            Some("Google Chrome".to_string()),
+            LayerBehavior {
+                name: Some("tabs".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+
+        assert!(
+            mgr.process(Key::Char('t'), Modifiers::NONE, true, "Google Chrome")
+                .handled
+        );
+        assert_eq!(mgr.active_layer_names(), vec!["tabs".to_string()]);
+
+        let switched = mgr.process(Key::Char('z'), Modifiers::NONE, true, "Ghostty");
+        assert!(!switched.handled);
+        assert!(mgr.active_layer_names().is_empty());
+    }
+
+    #[test]
+    fn keydown_miss_falls_back_to_root_in_same_event() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('t')],
+            Some("Google Chrome".to_string()),
+            LayerBehavior {
+                name: Some("tabs".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.register_layer(
+            vec![step('l')],
+            None,
+            LayerBehavior {
+                name: Some("launch".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+
+        assert!(
+            mgr.process(Key::Char('t'), Modifiers::NONE, true, "Google Chrome")
+                .handled
+        );
+        let activate_launch = mgr.process(Key::Char('l'), Modifiers::NONE, true, "Google Chrome");
+        assert!(activate_launch.handled);
+        assert_eq!(mgr.active_layer_names(), vec!["launch".to_string()]);
+    }
+
+    #[test]
+    fn keyup_miss_does_not_fallback_pop_or_activate() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, sticky(None));
+        mgr.bind(vec![step('a'), step('x')], None, Action::Reload);
+
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
+        let miss_up = mgr.process(Key::Char('z'), Modifiers::NONE, false, "");
+        assert!(!miss_up.handled);
+
+        let still_active = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(matches!(still_active.action, Some(Action::Reload)));
+    }
+
+    #[test]
+    fn keydown_miss_pops_multiple_layers_until_root_hit() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(vec![step('a')], None, sticky(None));
+        mgr.register_layer(vec![step('a'), step('b')], None, sticky(None));
+        mgr.bind(vec![step('l')], None, Action::Reload);
+
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
+        assert!(
+            mgr.process(Key::Char('b'), Modifiers::NONE, true, "")
+                .handled
+        );
+
+        let root_hit = mgr.process(Key::Char('l'), Modifiers::NONE, true, "");
+        assert!(matches!(root_hit.action, Some(Action::Reload)));
+        assert!(mgr.active_layer_names().is_empty());
     }
 }

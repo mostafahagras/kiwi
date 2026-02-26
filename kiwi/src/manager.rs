@@ -549,13 +549,51 @@ pub fn resize_window(resize: &Resize) {
     }
 }
 
-pub fn setup_manager(config: &Config) -> HotkeyManager {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyUsageKind {
+    Binding,
+    LayerActivation,
+}
+
+fn register_key_usage(
+    seen: &mut HashMap<(Option<String>, HotkeyStep), KeyUsageKind>,
+    scope: Option<&str>,
+    step: &HotkeyStep,
+    usage: KeyUsageKind,
+) -> Result<(), String> {
+    let key = (scope.map(str::to_string), step.clone());
+    if let Some(existing) = seen.get(&key)
+        && *existing != usage
+    {
+        let scope_label = scope.unwrap_or("global");
+        let (left, right) = match (existing, usage) {
+            (KeyUsageKind::Binding, KeyUsageKind::LayerActivation) => {
+                ("binding", "layer activation")
+            }
+            (KeyUsageKind::LayerActivation, KeyUsageKind::Binding) => {
+                ("layer activation", "binding")
+            }
+            _ => ("binding", "binding"),
+        };
+        return Err(format!(
+            "key conflict in scope '{scope_label}' for '{step}': {left} conflicts with {right}"
+        ));
+    }
+
+    seen.insert(key, usage);
+    Ok(())
+}
+
+pub fn setup_manager(config: &Config) -> Result<HotkeyManager, String> {
     let mut manager = HotkeyManager::new();
+    let mut seen: HashMap<(Option<String>, HotkeyStep), KeyUsageKind> = HashMap::new();
 
     // 1. Global binds
     for (binding, action) in &config.global_binds {
+        let step = HotkeyStep::new(binding.key.clone(), binding.modifiers);
+        register_key_usage(&mut seen, None, &step, KeyUsageKind::Binding)?;
         manager.bind(
-            vec![HotkeyStep::new(binding.key.clone(), binding.modifiers)],
+            vec![step],
             None,
             action.clone(),
         );
@@ -563,15 +601,30 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
 
     // 2. Layers
     for (trigger, layer) in &config.layers {
-        register_layer(&mut manager, Vec::new(), None, String::new(), trigger, layer);
+        register_layer(
+            &mut manager,
+            &mut seen,
+            Vec::new(),
+            None,
+            String::new(),
+            trigger,
+            layer,
+        )?;
     }
 
     // 3. Apps
     for (app_name, app_config) in &config.apps {
         // App binds
         for (binding, action) in &app_config.binds {
+            let step = HotkeyStep::new(binding.key.clone(), binding.modifiers);
+            register_key_usage(
+                &mut seen,
+                Some(app_name),
+                &step,
+                KeyUsageKind::Binding,
+            )?;
             manager.bind(
-                vec![HotkeyStep::new(binding.key.clone(), binding.modifiers)],
+                vec![step],
                 Some(app_name.clone()),
                 action.clone(),
             );
@@ -580,28 +633,37 @@ pub fn setup_manager(config: &Config) -> HotkeyManager {
         for (trigger, layer) in &app_config.children {
             register_layer(
                 &mut manager,
+                &mut seen,
                 Vec::new(),
                 Some(app_name.clone()),
                 format!("app:{app_name}"),
                 trigger,
                 layer,
-            );
+            )?;
         }
     }
 
-    manager
+    Ok(manager)
 }
 
 fn register_layer(
     manager: &mut HotkeyManager,
+    seen: &mut HashMap<(Option<String>, HotkeyStep), KeyUsageKind>,
     prefix: Vec<HotkeyStep>,
     context: Option<String>,
     name_prefix: String,
     trigger: &KeyBinding,
     layer: &Layer,
-) {
+) -> Result<(), String> {
     let mut layer_prefix = prefix;
-    layer_prefix.push(HotkeyStep::new(trigger.key.clone(), trigger.modifiers));
+    let activation_step = HotkeyStep::new(trigger.key.clone(), trigger.modifiers);
+    register_key_usage(
+        seen,
+        context.as_deref(),
+        &activation_step,
+        KeyUsageKind::LayerActivation,
+    )?;
+    layer_prefix.push(activation_step);
 
     let layer_name = if name_prefix.is_empty() {
         layer.name.clone()
@@ -631,23 +693,28 @@ fn register_layer(
     for (trigger, child_layer) in &layer.children {
         register_layer(
             manager,
+            seen,
             layer_prefix.clone(),
             context.clone(),
             layer_name.clone(),
             trigger,
             child_layer,
-        );
+        )?;
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::setup_manager;
     use super::trim_window_state;
     use super::{
         activate_intercept_mode, get_intercept_mode, intercept_decision, InterceptDecision,
         InterceptKind,
     };
     use kiwi_parser::{Key, KeyBinding, Modifiers};
+    use std::path::PathBuf;
     use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
@@ -740,5 +807,63 @@ mod tests {
 
         let after = intercept_decision(&Key::Char('a'), Modifiers::NONE, true);
         assert!(matches!(after, InterceptDecision::ProcessNormally));
+    }
+
+    #[test]
+    fn setup_manager_rejects_global_binding_and_layer_activation_conflict() {
+        let raw = r#"
+[binds]
+"cmd+e" = "reload"
+
+[layer.nav]
+activate = "cmd+e"
+"j" = "reload"
+"#;
+        let config =
+            kiwi_parser::parse_config(raw, PathBuf::from("test.toml")).expect("config parses");
+
+        let err = match setup_manager(&config) {
+            Ok(_) => panic!("expected global conflict"),
+            Err(err) => err,
+        };
+        assert!(err.contains("scope 'global'"));
+        assert!(err.contains("cmd+e"));
+    }
+
+    #[test]
+    fn setup_manager_rejects_app_binding_and_layer_activation_conflict() {
+        let raw = r#"
+[app."Google Chrome"]
+"cmd+e" = "reload"
+
+[app."Google Chrome".nav]
+activate = "cmd+e"
+"j" = "reload"
+"#;
+        let config =
+            kiwi_parser::parse_config(raw, PathBuf::from("test.toml")).expect("config parses");
+
+        let err = match setup_manager(&config) {
+            Ok(_) => panic!("expected app conflict"),
+            Err(err) => err,
+        };
+        assert!(err.contains("scope 'Google Chrome'"));
+        assert!(err.contains("cmd+e"));
+    }
+
+    #[test]
+    fn setup_manager_allows_cross_scope_same_key() {
+        let raw = r#"
+[binds]
+"cmd+e" = "reload"
+
+[app."Google Chrome"]
+"cmd+e" = "quit"
+"#;
+        let config =
+            kiwi_parser::parse_config(raw, PathBuf::from("test.toml")).expect("config parses");
+
+        let manager = setup_manager(&config);
+        assert!(manager.is_ok());
     }
 }

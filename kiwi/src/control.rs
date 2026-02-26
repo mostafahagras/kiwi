@@ -182,11 +182,14 @@ fn handle_request(request: ControlRequest, state: &ControlState) -> ControlRespo
         }
         ControlRequest::Reload => match crate::parse_config_from_path(&state.config_path) {
             Ok(config) => match state.manager.lock() {
-                Ok(mut mgr) => {
-                    *mgr = manager::setup_manager(&config);
-                    clear_window_state();
-                    ControlResponse::ok(json!({"reloaded": true}))
-                }
+                Ok(mut mgr) => match manager::setup_manager(&config) {
+                    Ok(new_manager) => {
+                        *mgr = new_manager;
+                        clear_window_state();
+                        ControlResponse::ok(json!({"reloaded": true}))
+                    }
+                    Err(err) => ControlResponse::err("reload_failed", err),
+                },
                 Err(_) => ControlResponse::err("internal", "failed to lock hotkey manager"),
             },
             Err(err) => ControlResponse::err("reload_failed", format!("{err:?}")),
