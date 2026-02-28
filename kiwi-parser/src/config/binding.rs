@@ -130,12 +130,12 @@ fn parse_keybinding_inner(
     // 4. Construction
     match resolved_key {
         Some(key) => {
-            if !allow_media_key && key.is_media_key() {
+            if !allow_media_key && key.is_non_interceptable_trigger_key() {
                 errors.push(ConfigError::InvalidBinding {
                     src: ctx.src.clone(),
                     raw: raw_key.to_string(),
                     span,
-                    message: "Media keys are not supported as trigger bindings; use them only in remap actions".into(),
+                    message: "This key is not interceptable as a trigger binding (allowed only as remap target)".into(),
                 });
                 return None;
             }
@@ -179,7 +179,24 @@ mod tests {
     }
 
     #[test]
-    fn trigger_binding_rejects_media_keys() {
+    fn trigger_binding_rejects_non_interceptable_special_keys() {
+        let src = NamedSource::new("test.toml", "".to_string());
+        let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+        let context = ctx(&src, &modifier_map);
+        let mut errors = Vec::new();
+
+        let parsed = parse_keybinding(
+            "missioncontrol",
+            SourceSpan::new(0.into(), 14),
+            &mut errors,
+            &context,
+        );
+        assert!(parsed.is_none());
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn trigger_binding_allows_interceptable_media_keys() {
         let src = NamedSource::new("test.toml", "".to_string());
         let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
         let context = ctx(&src, &modifier_map);
@@ -190,9 +207,11 @@ mod tests {
             SourceSpan::new(0.into(), 8),
             &mut errors,
             &context,
-        );
-        assert!(parsed.is_none());
-        assert!(!errors.is_empty());
+        )
+        .expect("trigger keybinding should parse");
+
+        assert_eq!(parsed.key, Key::VolumeUp);
+        assert!(errors.is_empty());
     }
 
     #[test]

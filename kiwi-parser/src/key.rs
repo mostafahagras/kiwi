@@ -95,6 +95,13 @@ impl Key {
                 | Self::DoNotDisturb
         )
     }
+
+    pub fn is_non_interceptable_trigger_key(&self) -> bool {
+        matches!(
+            self,
+            Self::MissionControl | Self::Spotlight | Self::Dictation | Self::DoNotDisturb
+        )
+    }
 }
 
 impl std::fmt::Display for Key {

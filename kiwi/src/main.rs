@@ -11,7 +11,7 @@ pub mod window;
 use crate::cli::error::{CliError, CliResult};
 use crate::cli::LogArgs;
 use crate::control::{default_socket_path, spawn_control_server, ControlState};
-use crate::input::{from_cg_code, get_character_from_event, USER_DATA};
+use crate::input::{from_cg_code, from_system_defined_event, get_character_from_event, USER_DATA};
 use crate::manager::RELOAD_REQUESTED;
 use crate::window::focused::init_focus_observer;
 use clap::Parser;
@@ -96,22 +96,35 @@ pub(crate) fn run_daemon(
         CGEventTapLocation::HID,
         CGEventTapPlacement::HeadInsertEventTap,
         CGEventTapOptions::Default,
-        vec![CGEventType::KeyDown, CGEventType::KeyUp],
+        vec![
+            CGEventType::KeyDown,
+            CGEventType::KeyUp,
+            unsafe { std::mem::transmute::<u32, CGEventType>(14) },
+        ],
         move |_proxy, type_, event| {
-                        let user_data = event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA);
+            let user_data = event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA);
             if user_data == USER_DATA {
                 return CallbackResult::Keep;
             }
 
-            let is_down = matches!(type_, CGEventType::KeyDown);
-            let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
             let flags = event.get_flags();
-
-            let char = get_character_from_event(event);
-            let key = match from_cg_code(key_code as u16, char) {
-                Some(k) => k,
-                None => return CallbackResult::Keep,
+            let (key, is_down) = match type_ {
+                CGEventType::KeyDown | CGEventType::KeyUp => {
+                    let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                    let char = get_character_from_event(event);
+                    let key = match from_cg_code(key_code as u16, char) {
+                        Some(k) => k,
+                        None => return CallbackResult::Keep,
+                    };
+                    (key, matches!(type_, CGEventType::KeyDown))
+                }
+                _ if (type_ as u32) == 14 => match from_system_defined_event(event) {
+                    Some((key, is_down)) => (key, is_down),
+                    None => return CallbackResult::Keep,
+                },
+                _ => return CallbackResult::Keep,
             };
+
             let modifiers = input::modifiers_from_cg_flags(flags);
             let app_name = crate::window::get_focused_app();
 

@@ -309,11 +309,22 @@ mode = "invalid"
     fn media_key_cannot_be_used_as_binding_trigger() {
         let raw = r#"
 [binds]
-"volumeup" = "reload"
+"missioncontrol" = "reload"
 "#;
 
         let err = parse_config(raw, PathBuf::from("test.toml"));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn media_key_can_be_used_as_binding_trigger() {
+        let raw = r#"
+[binds]
+"volumeup" = "reload"
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        assert_eq!(config.global_binds.len(), 1);
     }
 
     #[test]
