@@ -23,6 +23,8 @@ pub enum Key {
     Mute,
     BrightnessUp,
     BrightnessDown,
+    KeyboardBrightnessUp,
+    KeyboardBrightnessDown,
     PlayPause,
     NextTrack,
     PrevTrack,
@@ -55,6 +57,12 @@ impl Key {
             "mute" => Some(Self::Mute),
             "brightnessup" | "brup" => Some(Self::BrightnessUp),
             "brightnessdown" | "brdn" => Some(Self::BrightnessDown),
+            "keyboardbrightnessup" | "kbdbrightnessup" | "kbrup" | "kbup" => {
+                Some(Self::KeyboardBrightnessUp)
+            }
+            "keyboardbrightnessdown" | "kbdbrightnessdown" | "kbrdn" | "kbdown" | "kbdn" => {
+                Some(Self::KeyboardBrightnessDown)
+            }
             "playpause" | "play" => Some(Self::PlayPause),
             "next" | "nexttrack" => Some(Self::NextTrack),
             "prev" | "prevtrack" => Some(Self::PrevTrack),
@@ -76,6 +84,8 @@ impl Key {
                 | Self::Mute
                 | Self::BrightnessUp
                 | Self::BrightnessDown
+                | Self::KeyboardBrightnessUp
+                | Self::KeyboardBrightnessDown
                 | Self::PlayPause
                 | Self::NextTrack
                 | Self::PrevTrack
@@ -110,6 +120,8 @@ impl std::fmt::Display for Key {
             Self::Mute => write!(f, "mute"),
             Self::BrightnessUp => write!(f, "brightnessup"),
             Self::BrightnessDown => write!(f, "brightnessdown"),
+            Self::KeyboardBrightnessUp => write!(f, "keyboardbrightnessup"),
+            Self::KeyboardBrightnessDown => write!(f, "keyboardbrightnessdown"),
             Self::PlayPause => write!(f, "playpause"),
             Self::NextTrack => write!(f, "nexttrack"),
             Self::PrevTrack => write!(f, "prevtrack"),
@@ -202,5 +214,24 @@ impl std::fmt::Debug for KeyBinding {
         } else {
             write!(f, "{}+{}", self.modifiers, self.key)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Key;
+
+    #[test]
+    fn parses_keyboard_brightness_aliases() {
+        assert!(matches!(Key::parse("kbrup"), Some(Key::KeyboardBrightnessUp)));
+        assert!(matches!(Key::parse("kbup"), Some(Key::KeyboardBrightnessUp)));
+        assert!(matches!(
+            Key::parse("kbrdn"),
+            Some(Key::KeyboardBrightnessDown)
+        ));
+        assert!(matches!(
+            Key::parse("kbdown"),
+            Some(Key::KeyboardBrightnessDown)
+        ));
     }
 }

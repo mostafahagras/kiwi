@@ -104,6 +104,8 @@ fn media_keycode(key: &Key) -> Option<c_int> {
         Key::VolumeDown => Some(1),
         Key::BrightnessUp => Some(2),
         Key::BrightnessDown => Some(3),
+        Key::KeyboardBrightnessUp => Some(21),
+        Key::KeyboardBrightnessDown => Some(22),
         Key::Mute => Some(7),
         Key::PlayPause => Some(16),
         Key::NextTrack => Some(17),

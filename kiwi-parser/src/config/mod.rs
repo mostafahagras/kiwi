@@ -326,4 +326,15 @@ mode = "invalid"
         let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
         assert_eq!(config.global_binds.len(), 1);
     }
+
+    #[test]
+    fn remap_can_target_keyboard_brightness_aliases() {
+        let raw = r#"
+[binds]
+"cmd+k" = "remap:kbup"
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        assert_eq!(config.global_binds.len(), 1);
+    }
 }
