@@ -1,6 +1,7 @@
 use crate::cli::error::{CliError, CliResult};
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -63,10 +64,6 @@ pub fn run() -> CliResult<()> {
     let _ = Command::new("launchctl")
         .args(["bootout", &domain, plist_path.to_str().unwrap()])
         .output();
-    if app_path.exists() {
-        fs::remove_dir_all(&app_path)
-            .map_err(|e| CliError::new(format!("failed to remove old app bundle: {e}")))?;
-    }
     if log_dir.exists() {
         fs::remove_dir_all(&log_dir)
             .map_err(|e| CliError::new(format!("failed to clear old logs: {e}")))?;
@@ -108,14 +105,17 @@ pub fn run() -> CliResult<()> {
     )
     .map_err(|e| CliError::new(format!("failed to write launch plist: {e}")))?;
 
-    // 7. Bootstrap
+    // 7. Sign App Bundle
+    sign_app_bundle(&app_path)?;
+
+    // 8. Bootstrap
     println!("⚡ Bootstrapping service...");
     Command::new("launchctl")
         .args(["bootstrap", &domain, plist_path.to_str().unwrap()])
         .status()
         .map_err(|e| CliError::new(format!("failed to bootstrap service: {e}")))?;
 
-    // 8. Reactive Monitoring Loop
+    // 9. Reactive Monitoring Loop
     let mut attempts = 0;
     let max_attempts = 2;
 
@@ -221,4 +221,99 @@ fn generate_launch_plist(id: &str, exec: &Path, out: &Path, err: &Path) -> Strin
         out.to_str().unwrap(),
         err.to_str().unwrap()
     )
+}
+
+fn sign_app_bundle(app_path: &Path) -> CliResult<()> {
+    println!("✍️  Signing app bundle...");
+    let identity = select_apple_development_identity()?;
+    let app = app_path
+        .to_str()
+        .ok_or_else(|| CliError::new("app path contains invalid UTF-8"))?;
+
+    let status = Command::new("codesign")
+        .args([
+            "--deep",
+            "--force",
+            "--options",
+            "runtime",
+            "--sign",
+            &identity,
+            app,
+        ])
+        .status()
+        .map_err(|e| CliError::new(format!("failed to execute codesign: {e}")))?;
+
+    if !status.success() {
+        return Err(CliError::new(
+            "codesign failed. Ensure your Apple Development certificate is available in Keychain.",
+        ));
+    }
+
+    Ok(())
+}
+
+fn select_apple_development_identity() -> CliResult<String> {
+    let output = Command::new("security")
+        .args(["find-identity", "-v", "-p", "codesigning"])
+        .output()
+        .map_err(|e| CliError::new(format!("failed to run security find-identity: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CliError::new(
+            "security find-identity failed while discovering signing certificates",
+        ));
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|e| CliError::new(format!("invalid UTF-8 from security output: {e}")))?;
+
+    let mut identities = Vec::new();
+    for line in stdout.lines() {
+        if !line.contains("Apple Development:") {
+            continue;
+        }
+        if !line.trim_start().starts_with(|c: char| c.is_ascii_digit()) {
+            continue;
+        }
+
+        if let Some(start) = line.find('"') {
+            if let Some(end_rel) = line[start + 1..].find('"') {
+                let end = start + 1 + end_rel;
+                identities.push(line[start + 1..end].to_string());
+            }
+        }
+    }
+
+    match identities.len() {
+        0 => Err(CliError::new(
+            "no Apple Development signing identities found in keychain",
+        )),
+        1 => Ok(identities.remove(0)),
+        _ => {
+            println!("Multiple Apple Development identities found:");
+            for (idx, identity) in identities.iter().enumerate() {
+                println!("  {}) {}", idx + 1, identity);
+            }
+            print!("Select an identity (1-{}): ", identities.len());
+            io::stdout()
+                .flush()
+                .map_err(|e| CliError::new(format!("failed to flush stdout: {e}")))?;
+
+            let mut input = String::new();
+            io::stdin()
+                .read_line(&mut input)
+                .map_err(|e| CliError::new(format!("failed to read selection: {e}")))?;
+
+            let choice = input
+                .trim()
+                .parse::<usize>()
+                .map_err(|_| CliError::new("invalid identity selection"))?;
+
+            if choice == 0 || choice > identities.len() {
+                return Err(CliError::new("identity selection out of range"));
+            }
+
+            Ok(identities[choice - 1].clone())
+        }
+    }
 }
