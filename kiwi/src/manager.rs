@@ -182,7 +182,7 @@ pub fn handle_action(action: &Action) {
             if let Some(app_name) = cmd.strip_prefix("open -a ") {
                 launch_app(app_name.trim());
             } else {
-                ShellCommand::new("sh").arg("-c").arg(cmd).spawn().ok();
+                ShellCommand::new("sh").arg("-c").arg(cmd).status().ok();
             }
         }
         Action::Remap(binding) => {
