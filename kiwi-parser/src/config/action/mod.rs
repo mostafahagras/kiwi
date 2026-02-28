@@ -1,7 +1,11 @@
 pub mod resize;
 pub mod snap;
 
-use crate::config::{ValidationContext, binding::parse_keybinding, error::ConfigError};
+use crate::config::{
+    ValidationContext,
+    binding::{parse_keybinding, parse_remap_keybinding},
+    error::ConfigError,
+};
 use crate::key::{KeyBinding, Modifiers};
 use miette::{NamedSource, SourceSpan};
 use std::collections::HashMap;
@@ -96,7 +100,7 @@ fn parse_single_action_string(
         let payload = payload.trim();
         match prefix {
             "shell" => Some(Action::Shell(payload.to_string())),
-            "remap" => parse_keybinding(payload, span, errors, ctx).map(Action::Remap),
+            "remap" => parse_remap_keybinding(payload, span, errors, ctx).map(Action::Remap),
             "snap" => Snap::try_from(payload)
                 .map(Action::Snap)
                 .map_err(|e| {

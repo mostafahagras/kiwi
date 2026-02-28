@@ -67,6 +67,24 @@ impl Key {
             _ => None,
         }
     }
+
+    pub fn is_media_key(&self) -> bool {
+        matches!(
+            self,
+            Self::VolumeUp
+                | Self::VolumeDown
+                | Self::Mute
+                | Self::BrightnessUp
+                | Self::BrightnessDown
+                | Self::PlayPause
+                | Self::NextTrack
+                | Self::PrevTrack
+                | Self::MissionControl
+                | Self::Spotlight
+                | Self::Dictation
+                | Self::DoNotDisturb
+        )
+    }
 }
 
 impl std::fmt::Display for Key {

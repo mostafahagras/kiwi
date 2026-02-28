@@ -14,6 +14,25 @@ pub fn parse_keybinding(
     errors: &mut Vec<ConfigError>,
     ctx: &ValidationContext,
 ) -> Option<KeyBinding> {
+    parse_keybinding_inner(raw_key, span, errors, ctx, false)
+}
+
+pub fn parse_remap_keybinding(
+    raw_key: &str,
+    span: SourceSpan,
+    errors: &mut Vec<ConfigError>,
+    ctx: &ValidationContext,
+) -> Option<KeyBinding> {
+    parse_keybinding_inner(raw_key, span, errors, ctx, true)
+}
+
+fn parse_keybinding_inner(
+    raw_key: &str,
+    span: SourceSpan,
+    errors: &mut Vec<ConfigError>,
+    ctx: &ValidationContext,
+    allow_media_key: bool,
+) -> Option<KeyBinding> {
     // let mode = if raw_key.starts_with('@') {
     //     KeyBindingMode::Logical
     // } else {
@@ -110,11 +129,23 @@ pub fn parse_keybinding(
 
     // 4. Construction
     match resolved_key {
-        Some(key) => Some(KeyBinding {
-            modifiers: resolved_mods,
-            // mode,
-            key,
-        }),
+        Some(key) => {
+            if !allow_media_key && key.is_media_key() {
+                errors.push(ConfigError::InvalidBinding {
+                    src: ctx.src.clone(),
+                    raw: raw_key.to_string(),
+                    span,
+                    message: "Media keys are not supported as trigger bindings; use them only in remap actions".into(),
+                });
+                return None;
+            }
+
+            Some(KeyBinding {
+                modifiers: resolved_mods,
+                // mode,
+                key,
+            })
+        }
         None => {
             errors.push(ConfigError::InvalidBinding {
                 src: ctx.src.clone(),
@@ -124,5 +155,64 @@ pub fn parse_keybinding(
             });
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_keybinding, parse_remap_keybinding};
+    use crate::config::ValidationContext;
+    use crate::key::{Key, Modifiers};
+    use miette::{NamedSource, SourceSpan};
+    use std::collections::HashMap;
+
+    fn ctx<'a>(
+        src: &'a NamedSource<String>,
+        modifier_map: &'a HashMap<Modifiers, (String, SourceSpan)>,
+    ) -> ValidationContext<'a> {
+        ValidationContext {
+            src,
+            modifier_map,
+            modifier_names: Vec::new(),
+            app_aliases: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn trigger_binding_rejects_media_keys() {
+        let src = NamedSource::new("test.toml", "".to_string());
+        let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+        let context = ctx(&src, &modifier_map);
+        let mut errors = Vec::new();
+
+        let parsed = parse_keybinding(
+            "volumeup",
+            SourceSpan::new(0.into(), 8),
+            &mut errors,
+            &context,
+        );
+        assert!(parsed.is_none());
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn remap_binding_allows_media_keys_with_modifiers() {
+        let src = NamedSource::new("test.toml", "".to_string());
+        let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+        let context = ctx(&src, &modifier_map);
+        let mut errors = Vec::new();
+
+        let parsed = parse_remap_keybinding(
+            "cmd+shift+volumeup",
+            SourceSpan::new(0.into(), 18),
+            &mut errors,
+            &context,
+        )
+        .expect("remap keybinding should parse");
+
+        assert_eq!(parsed.key, Key::VolumeUp);
+        assert!(parsed.modifiers.contains(Modifiers::COMMAND));
+        assert!(parsed.modifiers.contains(Modifiers::SHIFT));
+        assert!(errors.is_empty());
     }
 }

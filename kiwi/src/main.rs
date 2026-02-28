@@ -8,14 +8,14 @@ pub mod manager;
 mod translate;
 pub mod window;
 
-use crate::cli::LogArgs;
 use crate::cli::error::{CliError, CliResult};
-use crate::control::{ControlState, default_socket_path, spawn_control_server};
-use crate::input::{USER_DATA, from_cg_code, get_character_from_event};
+use crate::cli::LogArgs;
+use crate::control::{default_socket_path, spawn_control_server, ControlState};
+use crate::input::{from_cg_code, get_character_from_event, USER_DATA};
 use crate::manager::RELOAD_REQUESTED;
 use crate::window::focused::init_focus_observer;
 use clap::Parser;
-use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes};
+use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
 use core_graphics::event::{
     CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
     CallbackResult, EventField,
@@ -91,14 +91,14 @@ pub(crate) fn run_daemon(
         socket_path: default_socket_path()?,
     };
     spawn_control_server(control_state)?;
-
+    
     let tap = CGEventTap::new(
         CGEventTapLocation::HID,
         CGEventTapPlacement::HeadInsertEventTap,
         CGEventTapOptions::Default,
         vec![CGEventType::KeyDown, CGEventType::KeyUp],
         move |_proxy, type_, event| {
-            let user_data = event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA);
+                        let user_data = event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA);
             if user_data == USER_DATA {
                 return CallbackResult::Keep;
             }

@@ -1,10 +1,12 @@
 use crate::ffi::CGEventKeyboardGetUnicodeString;
+use core::ffi::c_void;
 use foreign_types::ForeignType;
 use core_graphics::display::CGPoint;
 use core_graphics::event::CGEventTapLocation;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventType, CGKeyCode, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use kiwi_parser::{Key, KeyBinding, Modifiers};
+use std::ffi::{c_double, c_int};
 use std::cell::RefCell;
 use std::time::Duration;
 
@@ -12,6 +14,25 @@ pub const USER_DATA: i64 = 0x6B697769; // "kiwi" in hexadecimal
 
 thread_local! {
     static EVENT_SOURCE: RefCell<Option<CGEventSource>> = const { RefCell::new(None) };
+}
+
+#[repr(C)]
+struct ObjcCGPoint {
+    x: c_double,
+    y: c_double,
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+#[link(name = "CoreGraphics", kind = "framework")]
+#[link(name = "AppKit", kind = "framework")]
+#[link(name = "objc")]
+unsafe extern "C" {
+    fn CGEventPost(tap: u32, event: *mut c_void);
+    fn CGEventCreateKeyboardEvent(source: *mut c_void, keycode: u16, keydown: bool) -> *mut c_void;
+    fn CFRelease(obj: *mut c_void);
+    fn objc_getClass(name: *const u8) -> *mut c_void;
+    fn sel_registerName(name: *const u8) -> *mut c_void;
+    fn objc_msgSend();
 }
 
 pub fn modifiers_from_cg_flags(flags: core_graphics::event::CGEventFlags) -> Modifiers {
@@ -43,22 +64,144 @@ fn get_event_source() -> CGEventSource {
     })
 }
 
-pub fn send_key_combination(combo: &KeyBinding) {
-    let keycode = key_to_cg_keycode(&combo.key);
+fn modifiers_to_cg_flags(modifiers: Modifiers) -> CGEventFlags {
     let mut flags = CGEventFlags::empty();
-    if combo.modifiers.contains(Modifiers::SHIFT) {
+    if modifiers.contains(Modifiers::SHIFT) {
         flags |= CGEventFlags::CGEventFlagShift;
     }
-    if combo.modifiers.contains(Modifiers::CONTROL) {
+    if modifiers.contains(Modifiers::CONTROL) {
         flags |= CGEventFlags::CGEventFlagControl;
     }
-    if combo.modifiers.contains(Modifiers::OPTION) {
+    if modifiers.contains(Modifiers::OPTION) {
         flags |= CGEventFlags::CGEventFlagAlternate;
     }
-    if combo.modifiers.contains(Modifiers::COMMAND) {
+    if modifiers.contains(Modifiers::COMMAND) {
         flags |= CGEventFlags::CGEventFlagCommand;
     }
+    flags
+}
 
+fn modifiers_to_ns_flags(modifiers: Modifiers) -> u64 {
+    let mut flags = 0_u64;
+    if modifiers.contains(Modifiers::SHIFT) {
+        flags |= 1 << 17;
+    }
+    if modifiers.contains(Modifiers::CONTROL) {
+        flags |= 1 << 18;
+    }
+    if modifiers.contains(Modifiers::OPTION) {
+        flags |= 1 << 19;
+    }
+    if modifiers.contains(Modifiers::COMMAND) {
+        flags |= 1 << 20;
+    }
+    flags
+}
+
+fn media_keycode(key: &Key) -> Option<c_int> {
+    match key {
+        Key::VolumeUp => Some(0),
+        Key::VolumeDown => Some(1),
+        Key::BrightnessUp => Some(2),
+        Key::BrightnessDown => Some(3),
+        Key::Mute => Some(7),
+        Key::PlayPause => Some(16),
+        Key::NextTrack => Some(17),
+        Key::PrevTrack => Some(18),
+        _ => None,
+    }
+}
+
+fn press_media_key(media_keycode: c_int, modifiers: Modifiers) {
+    unsafe {
+        let ns_event = objc_getClass(b"NSEvent\0".as_ptr());
+        let sel_other = sel_registerName(
+            b"otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:\0"
+                .as_ptr(),
+        );
+        let sel_cg_event = sel_registerName(b"CGEvent\0".as_ptr());
+
+        type CreateEventFn = unsafe extern "C" fn(
+            *mut c_void,
+            *mut c_void,
+            usize,
+            ObjcCGPoint,
+            u64,
+            c_double,
+            i64,
+            *mut c_void,
+            i16,
+            isize,
+            isize,
+        ) -> *mut c_void;
+        let create_event: CreateEventFn = std::mem::transmute(objc_msgSend as *const ());
+
+        type GetCgEventFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        let get_cg_event: GetCgEventFn = std::mem::transmute(objc_msgSend as *const ());
+
+        for is_down in [true, false] {
+            let key_state_bits = if is_down { 0xA00 } else { 0xB00 };
+            let data1 = (media_keycode << 16) | key_state_bits;
+            let ns_flags = modifiers_to_ns_flags(modifiers);
+
+            let event = create_event(
+                ns_event,
+                sel_other,
+                14, // NSSystemDefined
+                ObjcCGPoint { x: 0.0, y: 0.0 },
+                ns_flags,
+                0.0,
+                0,
+                std::ptr::null_mut(),
+                8, // subtype
+                data1 as isize,
+                -1,
+            );
+
+            if !event.is_null() {
+                let cg_event = get_cg_event(event, sel_cg_event);
+                CGEventPost(0, cg_event);
+            }
+        }
+    }
+}
+
+fn press_virtual_key(code: u16) {
+    unsafe {
+        let down = CGEventCreateKeyboardEvent(std::ptr::null_mut(), code, true);
+        let up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), code, false);
+
+        if !down.is_null() {
+            CGEventPost(0, down);
+            CFRelease(down);
+        }
+        if !up.is_null() {
+            CGEventPost(0, up);
+            CFRelease(up);
+        }
+    }
+}
+
+fn is_virtual_system_key(key: &Key) -> bool {
+    matches!(
+        key,
+        Key::MissionControl | Key::Spotlight | Key::Dictation | Key::DoNotDisturb
+    )
+}
+
+pub fn send_key_combination(combo: &KeyBinding) {
+    if let Some(code) = media_keycode(&combo.key) {
+        press_media_key(code, combo.modifiers);
+        return;
+    }
+
+    if is_virtual_system_key(&combo.key) {
+        press_virtual_key(key_to_cg_keycode(&combo.key) as u16);
+        return;
+    }
+
+    let keycode = key_to_cg_keycode(&combo.key);
+    let flags = modifiers_to_cg_flags(combo.modifiers);
     let source = get_event_source();
 
     // Key Down
@@ -201,6 +344,10 @@ pub fn key_to_cg_keycode(key: &Key) -> CGKeyCode {
         Key::PageUp => 116,
         Key::PageDown => 121,
         Key::Delete => 117,
+        Key::MissionControl => 160,
+        Key::Spotlight => 177,
+        Key::Dictation => 176,
+        Key::DoNotDisturb => 178,
         _ => 0,
     }
 }

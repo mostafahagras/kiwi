@@ -304,4 +304,26 @@ mode = "invalid"
         let err = parse_config(raw, PathBuf::from("test.toml"));
         assert!(err.is_err());
     }
+
+    #[test]
+    fn media_key_cannot_be_used_as_binding_trigger() {
+        let raw = r#"
+[binds]
+"volumeup" = "reload"
+"#;
+
+        let err = parse_config(raw, PathBuf::from("test.toml"));
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn remap_can_target_media_key_with_modifiers() {
+        let raw = r#"
+[binds]
+"cmd+k" = "remap:cmd+shift+volumeup"
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        assert_eq!(config.global_binds.len(), 1);
+    }
 }
