@@ -7,7 +7,7 @@ mod utils;
 
 use crate::{
     config::{
-        action::{Action, parse_action},
+        action::{Action, ParseScope, parse_action},
         app::{App, parse_apps},
         binding::parse_keybinding,
         error::{ConfigError, MultiConfigError},
@@ -220,7 +220,15 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
             let trigger = parse_keybinding(&key_str, key_span, &mut errors, &ctx);
 
             // 2. Parse the action (Single or Sequence)
-            let action = parse_action(val, &mut errors, &ctx);
+            let action = parse_action(
+                val,
+                &mut errors,
+                &ctx,
+                ParseScope {
+                    in_layer: false,
+                    app_name: None,
+                },
+            );
 
             // 3. If both are valid, hydrate the map
             if let (Some(t), Some(a)) = (trigger, action) {
@@ -230,7 +238,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
     }
 
     let layers = match root.get("layer").and_then(|v| v.as_table()) {
-        Some(layers_table) => parse_layers(layers_table, &mut errors, &ctx),
+        Some(layers_table) => parse_layers(layers_table, &mut errors, &ctx, None),
         None => HashMap::new(),
     };
 
@@ -256,6 +264,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 #[cfg(test)]
 mod tests {
     use super::parse_config;
+    use crate::config::action::{Action, LayerTargetScope};
     use crate::config::layer::LayerMode;
     use std::path::PathBuf;
 
@@ -347,5 +356,63 @@ mode = "invalid"
 
         let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
         assert_eq!(config.global_binds.len(), 1);
+    }
+
+    #[test]
+    fn bare_binding_action_parses_as_send_key() {
+        let raw = r#"
+[binds]
+"cmd+sft+c" = ["cmd+l", "cmd+c", "esc", "esc"]
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let action = config
+            .global_binds
+            .values()
+            .next()
+            .expect("expected action");
+        match action {
+            Action::Sequence(items) => {
+                assert!(items.iter().all(|a| matches!(a, Action::SendKey(_))));
+            }
+            _ => panic!("expected action sequence"),
+        }
+    }
+
+    #[test]
+    fn repeat_and_layer_actions_parse_in_layer_scope() {
+        let raw = r#"
+[layer.media]
+activate = "hyper+m"
+"j" = ["repeat(brdn, 16)", "pop", "layer:root", "layer:launch"]
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let layer = config.layers.values().next().expect("layer");
+        let action = layer.binds.values().next().expect("action");
+        match action {
+            Action::Sequence(items) => {
+                assert!(matches!(items[0], Action::Repeat { .. }));
+                assert!(matches!(items[1], Action::LayerPop));
+                assert!(matches!(items[2], Action::LayerRoot));
+                match &items[3] {
+                    Action::LayerActivate { target, scope } => {
+                        assert_eq!(target, "launch");
+                        assert_eq!(scope, &LayerTargetScope::GlobalOnly);
+                    }
+                    _ => panic!("expected layer activate"),
+                }
+            }
+            _ => panic!("expected sequence action"),
+        }
+    }
+
+    #[test]
+    fn layer_action_is_rejected_outside_layer_scope() {
+        let raw = r#"
+[app.Ghostty]
+"cmd+j" = "layer:kiwi"
+"#;
+        assert!(parse_config(raw, PathBuf::from("test.toml")).is_err());
     }
 }

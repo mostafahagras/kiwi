@@ -1,6 +1,8 @@
 use crate::{
     config::{
-        ValidationContext, action::Action, action::parse_action, binding::parse_keybinding,
+        ValidationContext,
+        action::{Action, ParseScope, parse_action},
+        binding::parse_keybinding,
         error::ConfigError, layer::Layer, layer::parse_layers,
     },
     key::KeyBinding,
@@ -64,7 +66,15 @@ pub fn parse_apps(
 
                 // Parse as a binding
                 if let Some(trigger) = parse_keybinding(&i_key_str, i_key_span, errors, ctx)
-                    && let Some(action) = parse_action(i_val, errors, ctx)
+                    && let Some(action) = parse_action(
+                        i_val,
+                        errors,
+                        ctx,
+                        ParseScope {
+                            in_layer: false,
+                            app_name: Some(&resolved_name),
+                        },
+                    )
                 {
                     app_binds.insert(trigger, action);
                 }
@@ -73,7 +83,7 @@ pub fn parse_apps(
             // 3. Handle Nesting
             // IMPORTANT: Your struct says App.children is Vec<Layer>.
             // So we use parse_layers for anything nested inside an App.
-            let children = parse_layers(inner_table, errors, ctx);
+            let children = parse_layers(inner_table, errors, ctx, Some(&resolved_name));
 
             apps.insert(
                 resolved_name,

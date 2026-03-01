@@ -1,6 +1,6 @@
 use crate::hotkey::{HotkeyManager, HotkeyStep, LayerBehavior};
 use crate::window;
-use kiwi_parser::{Action, Config, Key, KeyBinding, Layer, Modifiers, Resize, Snap};
+use kiwi_parser::{Action, Config, Key, KeyBinding, Layer, LayerTargetScope, Modifiers, Resize, Snap};
 use std::collections::{HashMap, HashSet};
 use std::process::Command as ShellCommand;
 use std::sync::mpsc::{self, Sender};
@@ -8,13 +8,14 @@ use tracing::{debug, error, info};
 
 use core_graphics_types::geometry::CGRect;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 static WINDOW_STATE: OnceLock<Mutex<HashMap<u32, CGRect>>> = OnceLock::new();
 const WINDOW_STATE_MAX_ENTRIES: usize = 256;
 static ACTION_SENDER: OnceLock<Sender<Action>> = OnceLock::new();
 static ACTION_QUEUE_DEPTH: AtomicUsize = AtomicUsize::new(0);
 static INTERCEPT_MODE: OnceLock<Mutex<Option<InterceptMode>>> = OnceLock::new();
+static SHARED_MANAGER: OnceLock<Arc<Mutex<HotkeyManager>>> = OnceLock::new();
 
 fn get_window_state() -> &'static Mutex<HashMap<u32, CGRect>> {
     WINDOW_STATE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -114,6 +115,10 @@ pub fn init_action_executor() {
     let _ = ACTION_SENDER.set(tx);
 }
 
+pub fn set_shared_manager(manager: Arc<Mutex<HotkeyManager>>) {
+    let _ = SHARED_MANAGER.set(manager);
+}
+
 pub fn dispatch_action(action: Action) {
     if let Some(tx) = ACTION_SENDER.get() {
         ACTION_QUEUE_DEPTH.fetch_add(1, Ordering::SeqCst);
@@ -189,6 +194,21 @@ pub fn handle_action(action: &Action) {
             info!("Remapping to: {binding:?}");
             crate::input::send_key_combination(binding);
         }
+        Action::SendKey(binding) => {
+            crate::input::send_key_combination(binding);
+        }
+        Action::Repeat {
+            binding,
+            count,
+            delay_ms,
+        } => {
+            for i in 0..*count {
+                crate::input::send_key_combination(binding);
+                if *delay_ms > 0 && i + 1 < *count {
+                    std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
+                }
+            }
+        }
         Action::Snap(side) => {
             snap_window(side.clone());
         }
@@ -217,6 +237,39 @@ pub fn handle_action(action: &Action) {
         Action::Swallow(exit_binding) => {
             info!("Entering swallow mode until {:?}", exit_binding);
             activate_intercept_mode(InterceptKind::Swallow, exit_binding.clone());
+        }
+        Action::LayerPop => {
+            if let Some(shared) = SHARED_MANAGER.get()
+                && let Ok(mut mgr) = shared.lock()
+            {
+                let _ = mgr.pop_active_layer();
+            }
+        }
+        Action::LayerRoot => {
+            if let Some(shared) = SHARED_MANAGER.get()
+                && let Ok(mut mgr) = shared.lock()
+            {
+                mgr.clear_active_layers();
+            }
+        }
+        Action::LayerActivate { target, scope } => {
+            if let Some(shared) = SHARED_MANAGER.get()
+                && let Ok(mut mgr) = shared.lock()
+            {
+                let app_scope = match scope {
+                    LayerTargetScope::GlobalOnly => None,
+                    LayerTargetScope::App(app) => Some(app.as_str()),
+                };
+                let current_app = crate::window::get_focused_app();
+                match mgr.resolve_layer_target_name(target, app_scope) {
+                    Ok(layer_name) => {
+                        if let Err(e) = mgr.activate_layer(&layer_name, &current_app) {
+                            error!("Failed to activate layer '{layer_name}': {e}");
+                        }
+                    }
+                    Err(e) => error!("Failed to resolve layer target '{target}': {e}"),
+                }
+            }
         }
         _ => {
             error!("Action not yet fully implemented: {:?}", action);

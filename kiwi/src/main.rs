@@ -81,6 +81,7 @@ pub(crate) fn run_daemon(
         ))
     })?;
     let manager = Arc::new(Mutex::new(manager));
+    manager::set_shared_manager(manager.clone());
     let manager_ref = manager.clone();
     let reload_path = config_path.clone();
 

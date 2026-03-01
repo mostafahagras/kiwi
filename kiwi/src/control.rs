@@ -367,6 +367,7 @@ fn action_kind(action: &Action) -> &'static str {
     match action {
         Action::Shell(_) => "shell",
         Action::Remap(_) => "remap",
+        Action::SendKey(_) => "send_key",
         Action::Snap(_) => "snap",
         Action::Resize(_) => "resize",
         Action::Reload => "reload",
@@ -376,6 +377,10 @@ fn action_kind(action: &Action) -> &'static str {
         Action::Swallow(_) => "swallow",
         Action::Pass(_) => "pass",
         Action::Sequence(_) => "sequence",
+        Action::Repeat { .. } => "repeat",
+        Action::LayerPop => "layer_pop",
+        Action::LayerRoot => "layer_root",
+        Action::LayerActivate { .. } => "layer_activate",
     }
 }
 

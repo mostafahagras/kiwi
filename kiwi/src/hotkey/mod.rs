@@ -443,6 +443,90 @@ impl HotkeyManager {
     pub fn clear_active_layers(&mut self) {
         self.active_layers.clear();
     }
+
+    pub fn pop_active_layer(&mut self) -> bool {
+        self.active_layers.pop().is_some()
+    }
+
+    pub fn resolve_layer_target_name(
+        &self,
+        target: &str,
+        app_scope: Option<&str>,
+    ) -> Result<String, String> {
+        if let Some(global_target) = target.strip_prefix("root.") {
+            if global_target.is_empty() {
+                return Err("layer target after 'root.' cannot be empty".to_string());
+            }
+            return self
+                .match_layer_target(global_target, None)?
+                .ok_or_else(|| format!("unknown global layer target: {global_target}"));
+        }
+
+        if let Some(app) = app_scope {
+            if let Some(app_hit) = self.match_layer_target(target, Some(app))? {
+                return Ok(app_hit);
+            }
+            return self
+                .match_layer_target(target, None)?
+                .ok_or_else(|| format!("unknown layer target '{target}' in app '{app}'"));
+        }
+
+        self.match_layer_target(target, None)?
+            .ok_or_else(|| format!("unknown global layer target: {target}"))
+    }
+
+    fn match_layer_target(
+        &self,
+        target: &str,
+        app_scope: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let mut hits = Vec::new();
+
+        for name in self.layer_registry.keys() {
+            let candidate = match app_scope {
+                Some(app) => {
+                    let prefix = format!("app:{app}.");
+                    let Some(local) = name.strip_prefix(&prefix) else {
+                        continue;
+                    };
+                    local
+                }
+                None => {
+                    if !self
+                        .layer_registry
+                        .get(name)
+                        .is_some_and(|reg| reg.context.is_none())
+                    {
+                        continue;
+                    }
+                    name.as_str()
+                }
+            };
+
+            let matched = if target.contains('.') {
+                candidate == target
+            } else {
+                candidate.rsplit('.').next() == Some(target)
+            };
+
+            if matched {
+                hits.push(name.clone());
+            }
+        }
+
+        if hits.is_empty() {
+            return Ok(None);
+        }
+        if hits.len() > 1 {
+            hits.sort();
+            return Err(format!(
+                "ambiguous layer target '{target}', matches: {}",
+                hits.join(", ")
+            ));
+        }
+
+        Ok(hits.into_iter().next())
+    }
 }
 
 impl Default for HotkeyManager {
@@ -861,5 +945,58 @@ mod tests {
         let root_hit = mgr.process(Key::Char('l'), Modifiers::NONE, true, "");
         assert!(matches!(root_hit.action, Some(Action::Reload)));
         assert!(mgr.active_layer_names().is_empty());
+    }
+
+    #[test]
+    fn resolve_layer_target_prefers_app_local_then_global() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('l')],
+            None,
+            LayerBehavior {
+                name: Some("launch".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.register_layer(
+            vec![step('t')],
+            Some("Google Chrome".to_string()),
+            LayerBehavior {
+                name: Some("app:Google Chrome.launch".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+
+        let local = mgr
+            .resolve_layer_target_name("launch", Some("Google Chrome"))
+            .expect("app-local should resolve");
+        assert_eq!(local, "app:Google Chrome.launch");
+
+        let forced_global = mgr
+            .resolve_layer_target_name("root.launch", Some("Google Chrome"))
+            .expect("global should resolve");
+        assert_eq!(forced_global, "launch");
+    }
+
+    #[test]
+    fn resolve_layer_target_global_scope_cannot_see_app_layers() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('t')],
+            Some("Google Chrome".to_string()),
+            LayerBehavior {
+                name: Some("app:Google Chrome.tabs".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+
+        let err = mgr.resolve_layer_target_name("tabs", None).expect_err("must fail");
+        assert!(err.contains("unknown global layer target"));
     }
 }

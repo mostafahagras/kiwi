@@ -170,18 +170,35 @@ Action value can be:
 - `sleep:<milliseconds>`
 - `pass:<binding>`
 - `swallow:<binding>`
+- `layer:<target>` (layer-local only)
 
 Special non-prefixed actions:
 - `reload`
 - `quit`
+- `pop` (layer-local only)
+- any valid `<binding>` (e.g. `cmd+l`, `esc`, `brdn`) sends that key combination
+- `repeat(<binding>, <count>[, <delay_ms>])`
 
-If no known prefix is present, the value is treated as a shell command.
+If the value is a valid binding string, Kiwi sends that key combination.
+Otherwise, if no known prefix is present, the value is treated as a shell command.
 
 ### `pass` and `swallow`
 
 - `pass:<binding>`: Kiwi stops handling hotkeys until `<binding>` is pressed; other input is passed through.
 - `swallow:<binding>`: Kiwi swallows all input until `<binding>` is pressed.
 - Exit binding is consumed on key down/up.
+
+### Layer Control Actions
+
+- `pop`: pop one active layer frame.
+- `layer:root`: clear active layers (return to root).
+- `layer:<name>`: activate layer by scoped name.
+- `layer:root.<name>`: force global layer lookup from app-scoped layers.
+
+Layer target lookup rules:
+- In global layer scope: only global layers are considered.
+- In app layer scope: app-local layer namespace is checked first, then global fallback.
+- If both app-local and global layers share the same short name, app-local wins by default.
 
 ### Snap Modes
 

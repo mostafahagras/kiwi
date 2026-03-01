@@ -1,7 +1,7 @@
 use crate::{
     config::{
         ValidationContext,
-        action::{Action, parse_action},
+        action::{Action, ParseScope, parse_action},
         binding::parse_keybinding,
         error::ConfigError,
         utils::is_similar,
@@ -41,6 +41,7 @@ pub fn parse_layers(
     table: &toml_span::value::Table,
     errors: &mut Vec<ConfigError>,
     ctx: &ValidationContext,
+    app_name: Option<&str>,
 ) -> HashMap<KeyBinding, Layer> {
     let reserved = ["activate", "timeout", "mode", "deactivate"];
     let mut layers: HashMap<KeyBinding, Layer> = HashMap::new();
@@ -140,7 +141,15 @@ pub fn parse_layers(
                         // It's a binding. Try to parse both sides.
                         if let Some(trigger) =
                             parse_keybinding(&i_key_str, i_key_span, errors, ctx)
-                            && let Some(action) = parse_action(i_val, errors, ctx)
+                            && let Some(action) = parse_action(
+                                i_val,
+                                errors,
+                                ctx,
+                                ParseScope {
+                                    in_layer: true,
+                                    app_name,
+                                },
+                            )
                         {
                             layer_binds.insert(trigger, action);
                         }
@@ -162,7 +171,7 @@ pub fn parse_layers(
             //     });
             // }
             // 3. Handle Nested Layers (Recursion)
-            let children = parse_layers(inner_table, errors, ctx);
+            let children = parse_layers(inner_table, errors, ctx, app_name);
 
             if let Some(trigger) = activate_trigger {
                 // --- DUPLICATE CHECK START ---
