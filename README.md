@@ -165,6 +165,7 @@ Action value can be:
 
 - `shell:<command>`
 - `remap:<binding>`
+- `type:<text>`
 - `snap:<position>`
 - `resize:<mode>`
 - `sleep:<milliseconds>`

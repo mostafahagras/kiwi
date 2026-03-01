@@ -33,6 +33,8 @@ pub enum Action {
     Shell(String),
     /// Remaps a keybinding to another
     Remap(KeyBinding),
+    /// Types a unicode string as keyboard input
+    Type(String),
     /// Sends a keybinding as input
     SendKey(KeyBinding),
     /// Snaps the window to a predefined position
@@ -182,11 +184,12 @@ fn parse_single_action_string(
         });
     }
 
-    if let Some((prefix, payload)) = trimmed.split_once(':') {
+    if let Some((prefix, payload)) = trimmed.split_once(':') && !prefix.contains(char::is_whitespace) {
         let payload = payload.trim();
         match prefix {
             "shell" => Some(Action::Shell(payload.to_string())),
             "remap" => parse_remap_keybinding(payload, span, errors, ctx).map(Action::Remap),
+            "type" => Some(Action::Type(payload.to_string())),
             "snap" => Snap::try_from(payload)
                 .map(Action::Snap)
                 .map_err(|e| {
@@ -228,7 +231,7 @@ fn parse_single_action_string(
                     src: ctx.src.clone(),
                     found: prefix.to_string(),
                     span,
-                    help: "Valid prefixes: shell, remap, snap, resize, sleep, swallow, pass, layer".into(),
+                    help: "Valid prefixes: shell, remap, type, snap, resize, sleep, swallow, pass, layer".into(),
                 });
                 None
             }

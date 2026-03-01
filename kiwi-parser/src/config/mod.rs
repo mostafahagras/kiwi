@@ -383,7 +383,7 @@ mode = "invalid"
     fn repeat_and_layer_actions_parse_in_layer_scope() {
         let raw = r#"
 [layer.media]
-activate = "hyper+m"
+activate = "cmd+m"
 "j" = ["repeat(brdn, 16)", "pop", "layer:root", "layer:launch"]
 "#;
 
@@ -414,5 +414,25 @@ activate = "hyper+m"
 "cmd+j" = "layer:kiwi"
 "#;
         assert!(parse_config(raw, PathBuf::from("test.toml")).is_err());
+    }
+
+    #[test]
+    fn type_action_parses_from_prefix() {
+        let raw = r#"
+[binds]
+"cmd+t" = "type:Hello from Unicode injection 🚀"
+"#;
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let action = config
+            .global_binds
+            .values()
+            .next()
+            .expect("expected action");
+        match action {
+            Action::Type(text) => {
+                assert_eq!(text, "Hello from Unicode injection 🚀");
+            }
+            _ => panic!("expected type action"),
+        }
     }
 }

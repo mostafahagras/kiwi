@@ -6,6 +6,7 @@ use core_graphics::event::CGEventTapLocation;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventType, CGKeyCode, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use kiwi_parser::{Key, KeyBinding, Modifiers};
+use tracing::info;
 use std::ffi::{c_double, c_int};
 use std::cell::RefCell;
 use std::time::Duration;
@@ -29,6 +30,11 @@ struct ObjcCGPoint {
 unsafe extern "C" {
     fn CGEventPost(tap: u32, event: *mut c_void);
     fn CGEventCreateKeyboardEvent(source: *mut c_void, keycode: u16, keydown: bool) -> *mut c_void;
+    fn CGEventKeyboardSetUnicodeString(
+        event: *mut c_void,
+        string_length: u64,
+        unicode_string: *const u16,
+    );
     fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
     fn CFRelease(obj: *mut c_void);
     fn objc_getClass(name: *const u8) -> *mut c_void;
@@ -245,6 +251,31 @@ pub fn send_key_combination(combo: &KeyBinding) {
             USER_DATA,
         );
         event.post(CGEventTapLocation::HID);
+    }
+}
+
+pub fn type_unicode_string(text: &str) {
+    info!("Typing unicode string: {text}");
+    let utf16: Vec<u16> = text.encode_utf16().collect();
+    unsafe {
+        let source = std::ptr::null_mut();
+        let down = CGEventCreateKeyboardEvent(source, 0, true);
+        let up = CGEventCreateKeyboardEvent(source, 0, false);
+
+        for event in [down, up] {
+            if event.is_null() {
+                continue;
+            }
+
+            CGEventSetIntegerValueField(
+                event,
+                CG_EVENT_SOURCE_USER_DATA_FIELD,
+                USER_DATA,
+            );
+            CGEventKeyboardSetUnicodeString(event, utf16.len() as u64, utf16.as_ptr());
+            CGEventPost(0, event);
+            CFRelease(event);
+        }
     }
 }
 

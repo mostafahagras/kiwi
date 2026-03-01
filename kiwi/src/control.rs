@@ -367,6 +367,7 @@ fn action_kind(action: &Action) -> &'static str {
     match action {
         Action::Shell(_) => "shell",
         Action::Remap(_) => "remap",
+        Action::Type(_) => "type",
         Action::SendKey(_) => "send_key",
         Action::Snap(_) => "snap",
         Action::Resize(_) => "resize",

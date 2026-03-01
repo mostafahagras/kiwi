@@ -194,6 +194,9 @@ pub fn handle_action(action: &Action) {
             info!("Remapping to: {binding:?}");
             crate::input::send_key_combination(binding);
         }
+        Action::Type(text) => {
+            crate::input::type_unicode_string(text);
+        }
         Action::SendKey(binding) => {
             crate::input::send_key_combination(binding);
         }
