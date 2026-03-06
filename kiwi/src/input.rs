@@ -2,12 +2,17 @@ use crate::ffi::CGEventKeyboardGetUnicodeString;
 use core::ffi::c_void;
 use core_graphics::display::CGPoint;
 use core_graphics::event::CGEventTapLocation;
-use core_graphics::event::{CGEvent, CGEventFlags, CGEventType, CGKeyCode, CGMouseButton};
+use core_graphics::event::{
+    CGEvent, CGEventFlags, CGEventType, CGKeyCode, CGMouseButton, EventField,
+};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use foreign_types::ForeignType;
 use kiwi_parser::{Key, KeyBinding, Modifiers};
+use objc2::runtime::AnyObject;
+use objc2::{class, msg_send};
+use objc2_foundation::NSPoint;
 use std::cell::RefCell;
-use std::ffi::{c_double, c_int};
+use std::ffi::c_int;
 use std::time::Duration;
 use tracing::info;
 
@@ -17,16 +22,9 @@ thread_local! {
     static EVENT_SOURCE: RefCell<Option<CGEventSource>> = const { RefCell::new(None) };
 }
 
-#[repr(C)]
-struct ObjcCGPoint {
-    x: c_double,
-    y: c_double,
-}
-
 #[link(name = "CoreFoundation", kind = "framework")]
 #[link(name = "CoreGraphics", kind = "framework")]
 #[link(name = "AppKit", kind = "framework")]
-#[link(name = "objc")]
 unsafe extern "C" {
     fn CGEventPost(tap: u32, event: *mut c_void);
     fn CGEventCreateKeyboardEvent(source: *mut c_void, keycode: u16, keydown: bool) -> *mut c_void;
@@ -37,25 +35,22 @@ unsafe extern "C" {
     );
     fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
     fn CFRelease(obj: *mut c_void);
-    fn objc_getClass(name: *const u8) -> *mut c_void;
-    fn sel_registerName(name: *const u8) -> *mut c_void;
-    fn objc_msgSend();
 }
 
 const CG_EVENT_SOURCE_USER_DATA_FIELD: u32 = 42;
 
-pub fn modifiers_from_cg_flags(flags: core_graphics::event::CGEventFlags) -> Modifiers {
+pub fn modifiers_from_cg_flags(flags: CGEventFlags) -> Modifiers {
     let mut result = Modifiers::NONE;
-    if flags.contains(core_graphics::event::CGEventFlags::CGEventFlagShift) {
+    if flags.contains(CGEventFlags::CGEventFlagShift) {
         result |= Modifiers::SHIFT;
     }
-    if flags.contains(core_graphics::event::CGEventFlags::CGEventFlagControl) {
+    if flags.contains(CGEventFlags::CGEventFlagControl) {
         result |= Modifiers::CONTROL;
     }
-    if flags.contains(core_graphics::event::CGEventFlags::CGEventFlagAlternate) {
+    if flags.contains(CGEventFlags::CGEventFlagAlternate) {
         result |= Modifiers::OPTION;
     }
-    if flags.contains(core_graphics::event::CGEventFlags::CGEventFlagCommand) {
+    if flags.contains(CGEventFlags::CGEventFlagCommand) {
         result |= Modifiers::COMMAND;
     }
     result
@@ -125,52 +120,26 @@ fn media_keycode(key: &Key) -> Option<c_int> {
 
 fn press_media_key(media_keycode: c_int, modifiers: Modifiers) {
     unsafe {
-        let ns_event = objc_getClass(b"NSEvent\0".as_ptr());
-        let sel_other = sel_registerName(
-            b"otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:\0"
-                .as_ptr(),
-        );
-        let sel_cg_event = sel_registerName(b"CGEvent\0".as_ptr());
-
-        type CreateEventFn = unsafe extern "C" fn(
-            *mut c_void,
-            *mut c_void,
-            usize,
-            ObjcCGPoint,
-            u64,
-            c_double,
-            i64,
-            *mut c_void,
-            i16,
-            isize,
-            isize,
-        ) -> *mut c_void;
-        let create_event: CreateEventFn = std::mem::transmute(objc_msgSend as *const ());
-
-        type GetCgEventFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
-        let get_cg_event: GetCgEventFn = std::mem::transmute(objc_msgSend as *const ());
-
         for is_down in [true, false] {
             let key_state_bits = if is_down { 0xA00 } else { 0xB00 };
             let data1 = (media_keycode << 16) | key_state_bits;
             let ns_flags = modifiers_to_ns_flags(modifiers);
 
-            let event = create_event(
-                ns_event,
-                sel_other,
-                14, // NSSystemDefined
-                ObjcCGPoint { x: 0.0, y: 0.0 },
-                ns_flags,
-                0.0,
-                0,
-                std::ptr::null_mut(),
-                8, // subtype
-                data1 as isize,
-                -1,
-            );
+            let event: *mut AnyObject = msg_send![
+                class!(NSEvent),
+                otherEventWithType: 14usize,
+                location: NSPoint::new(0.0, 0.0),
+                modifierFlags: ns_flags,
+                timestamp: 0.0f64,
+                windowNumber: 0i64,
+                context: std::ptr::null_mut::<AnyObject>(),
+                subtype: 8i16,
+                data1: data1 as isize,
+                data2: -1isize
+            ];
 
             if !event.is_null() {
-                let cg_event = get_cg_event(event, sel_cg_event);
+                let cg_event: *mut c_void = msg_send![event, CGEvent];
                 CGEventSetIntegerValueField(cg_event, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
                 CGEventPost(0, cg_event);
             }
@@ -221,10 +190,7 @@ pub fn send_key_combination(combo: &KeyBinding) {
     // Key Down
     if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), keycode, true) {
         event.set_flags(flags);
-        event.set_integer_value_field(
-            core_graphics::event::EventField::EVENT_SOURCE_USER_DATA,
-            USER_DATA,
-        );
+        event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 
@@ -234,10 +200,7 @@ pub fn send_key_combination(combo: &KeyBinding) {
     // Key Up
     if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), keycode, false) {
         event.set_flags(flags);
-        event.set_integer_value_field(
-            core_graphics::event::EventField::EVENT_SOURCE_USER_DATA,
-            USER_DATA,
-        );
+        event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 }
@@ -273,10 +236,7 @@ pub fn click(point: CGPoint) {
         point,
         CGMouseButton::Left,
     ) {
-        event.set_integer_value_field(
-            core_graphics::event::EventField::EVENT_SOURCE_USER_DATA,
-            USER_DATA,
-        );
+        event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 
@@ -289,10 +249,7 @@ pub fn click(point: CGPoint) {
         point,
         CGMouseButton::Left,
     ) {
-        event.set_integer_value_field(
-            core_graphics::event::EventField::EVENT_SOURCE_USER_DATA,
-            USER_DATA,
-        );
+        event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
     }
 }
@@ -472,37 +429,20 @@ pub fn get_character_from_event(event: &CGEvent) -> Option<char> {
 
 pub fn from_system_defined_event(event: &CGEvent) -> Option<(Key, bool)> {
     unsafe {
-        let ns_event_class = objc_getClass(b"NSEvent\0".as_ptr());
-        let sel_event_with_cg = sel_registerName(b"eventWithCGEvent:\0".as_ptr());
-        let sel_subtype = sel_registerName(b"subtype\0".as_ptr());
-        let sel_data1 = sel_registerName(b"data1\0".as_ptr());
-
-        type EventWithCgFn =
-            unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
-        let event_with_cg: EventWithCgFn = std::mem::transmute(objc_msgSend as *const ());
-
-        type SubtypeFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> i16;
-        let subtype_fn: SubtypeFn = std::mem::transmute(objc_msgSend as *const ());
-
-        type Data1Fn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> isize;
-        let data1_fn: Data1Fn = std::mem::transmute(objc_msgSend as *const ());
-
-        let ns_event = event_with_cg(
-            ns_event_class,
-            sel_event_with_cg,
-            event.as_ptr() as *mut c_void,
-        );
+        let ns_event: *mut AnyObject =
+            msg_send![class!(NSEvent), eventWithCGEvent: event.as_ptr() as *mut c_void];
         if ns_event.is_null() {
             return None;
         }
 
         // Subtype 8 is for aux control buttons / media keys.
-        let subtype = subtype_fn(ns_event, sel_subtype);
+        let subtype: i16 = msg_send![ns_event, subtype];
         if subtype != 8 {
             return None;
         }
 
-        let data1 = data1_fn(ns_event, sel_data1) as i64;
+        let data1: isize = msg_send![ns_event, data1];
+        let data1 = data1 as i64;
         let key_type = ((data1 >> 16) & 0xFFFF) as i32;
         let key_state = (data1 & 0xFF00) as i32;
         let is_down = match key_state {

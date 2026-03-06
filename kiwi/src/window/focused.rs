@@ -1,16 +1,13 @@
-#![allow(unexpected_cfgs)]
-
 use super::list::dict_to_window_info;
 use crate::ffi::*;
-use cocoa::base::{id, nil};
-use cocoa::foundation::{NSAutoreleasePool, NSString};
 use core_foundation::array::CFArray;
 use core_foundation::base::{CFType, CFTypeRef, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
-use objc::declare::ClassDecl;
-use objc::runtime::{Object, Sel};
-use objc::{msg_send, sel, sel_impl};
+use objc2::rc::autoreleasepool;
+use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, NSObject, Sel};
+use objc2::{ClassType, class, msg_send, sel};
+use objc2_foundation::ns_string;
 use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
 pub struct FocusedWindowRef {
@@ -86,40 +83,49 @@ pub fn get_focused_window_ref() -> Option<FocusedWindowRef> {
 }
 
 fn get_frontmost_app_pid() -> Option<i32> {
-    use objc::runtime::Object;
-    use objc::{msg_send, sel, sel_impl};
-
     unsafe {
-        let workspace: *mut Object = msg_send![objc::class!(NSWorkspace), sharedWorkspace];
-        let frontmost_app: *mut Object = msg_send![workspace, frontmostApplication];
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return None;
+        }
+
+        let frontmost_app: *mut AnyObject = msg_send![workspace, frontmostApplication];
         if frontmost_app.is_null() {
             return None;
         }
+
         let pid: i32 = msg_send![frontmost_app, processIdentifier];
         Some(pid)
     }
 }
 
 pub fn get_frontmost_app_name() -> Option<String> {
-    use core_foundation::base::TCFType;
-    use core_foundation::string::{CFString, CFStringRef};
-    use objc::runtime::Object;
-    use objc::{msg_send, sel, sel_impl};
-
     unsafe {
-        let workspace: *mut Object = msg_send![objc::class!(NSWorkspace), sharedWorkspace];
-        let frontmost_app: *mut Object = msg_send![workspace, frontmostApplication];
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return None;
+        }
+
+        let frontmost_app: *mut AnyObject = msg_send![workspace, frontmostApplication];
         if frontmost_app.is_null() {
             return None;
         }
 
-        let name_ref: CFStringRef = msg_send![frontmost_app, localizedName];
-        if name_ref.is_null() {
+        let name_nsstring: *mut AnyObject = msg_send![frontmost_app, localizedName];
+        if name_nsstring.is_null() {
             return None;
         }
 
-        let cf_string = CFString::wrap_under_get_rule(name_ref);
-        Some(cf_string.to_string())
+        let name_c_str: *const std::os::raw::c_char = msg_send![name_nsstring, UTF8String];
+        if name_c_str.is_null() {
+            return None;
+        }
+
+        Some(
+            std::ffi::CStr::from_ptr(name_c_str)
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 }
 
@@ -131,39 +137,57 @@ pub fn get_focused_app() -> String {
     FOCUSED_APP.read().unwrap().clone()
 }
 
-fn update_focused_app(app: id) {
-    if app == nil {
+fn update_focused_app(app: *mut AnyObject) {
+    if app.is_null() {
         return;
     }
-    unsafe {
-        let name_nsstring: id = msg_send![app, localizedName];
-        if name_nsstring != nil {
-            let name_c_str: *const std::os::raw::c_char = msg_send![name_nsstring, UTF8String];
-            if !name_c_str.is_null() {
-                let name = std::ffi::CStr::from_ptr(name_c_str)
-                    .to_string_lossy()
-                    .into_owned();
 
-                let mut lock = FOCUSED_APP.write().unwrap();
-                *lock = name;
-            }
-        }
-    }
-}
-
-extern "C" fn handle_notification(_this: &Object, _sel: Sel, notification: id) {
     unsafe {
-        let user_info: id = msg_send![notification, userInfo];
-        if user_info == nil {
+        let name_nsstring: *mut AnyObject = msg_send![app, localizedName];
+        if name_nsstring.is_null() {
             return;
         }
 
-        let ns_workspace_application_key: id =
-            NSString::alloc(nil).init_str("NSWorkspaceApplicationKey");
-        let app: id = msg_send![user_info, objectForKey: ns_workspace_application_key];
+        let name_c_str: *const std::os::raw::c_char = msg_send![name_nsstring, UTF8String];
+        if name_c_str.is_null() {
+            return;
+        }
 
+        let name = std::ffi::CStr::from_ptr(name_c_str)
+            .to_string_lossy()
+            .into_owned();
+
+        let mut lock = FOCUSED_APP.write().unwrap();
+        *lock = name;
+    }
+}
+
+extern "C" fn handle_notification(_this: *mut AnyObject, _sel: Sel, notification: *mut AnyObject) {
+    unsafe {
+        let user_info: *mut AnyObject = msg_send![notification, userInfo];
+        if user_info.is_null() {
+            return;
+        }
+
+        let app: *mut AnyObject = msg_send![user_info, objectForKey: ns_string!("NSWorkspaceApplicationKey")];
         update_focused_app(app);
     }
+}
+
+fn focus_observer_class() -> &'static AnyClass {
+    static FOCUS_OBSERVER_CLASS: OnceLock<&'static AnyClass> = OnceLock::new();
+
+    *FOCUS_OBSERVER_CLASS.get_or_init(|| unsafe {
+        if let Some(mut builder) = ClassBuilder::new(c"FocusObserver", NSObject::class()) {
+            builder.add_method(
+                sel!(handleNotification:),
+                handle_notification as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject),
+            );
+            builder.register()
+        } else {
+            AnyClass::get(c"FocusObserver").expect("FocusObserver class should already exist")
+        }
+    })
 }
 
 pub fn init_focus_observer() {
@@ -171,42 +195,35 @@ pub fn init_focus_observer() {
         return;
     }
 
-    unsafe {
-        let _pool = NSAutoreleasePool::new(nil);
+    autoreleasepool(|_| unsafe {
+        // Fetch initial focused app.
+        let ns_workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if ns_workspace.is_null() {
+            return;
+        }
 
-        // Fetch initial focused app
-        let ns_workspace: id = msg_send![
-            objc::runtime::Class::get("NSWorkspace").unwrap(),
-            sharedWorkspace
-        ];
-        let frontmost_app: id = msg_send![ns_workspace, frontmostApplication];
+        let frontmost_app: *mut AnyObject = msg_send![ns_workspace, frontmostApplication];
         update_focused_app(frontmost_app);
 
-        // Create FocusObserver class at runtime
-        let superclass = objc::runtime::Class::get("NSObject").unwrap();
-        let mut decl = ClassDecl::new("FocusObserver", superclass).unwrap();
+        // Create/reuse FocusObserver class and instance.
+        let observer_instance: *mut AnyObject = msg_send![focus_observer_class(), new];
+        if observer_instance.is_null() {
+            return;
+        }
 
-        decl.add_method(
-            sel!(handleNotification:),
-            handle_notification as extern "C" fn(&Object, Sel, id),
-        );
-
-        let clz = decl.register();
-        let observer_instance: id = msg_send![clz, new];
-
-        // Get notification center from shared workspace
-        let notification_center: id = msg_send![ns_workspace, notificationCenter];
-
-        let notification_name =
-            NSString::alloc(nil).init_str("NSWorkspaceDidActivateApplicationNotification");
+        // Register for workspace app activation notifications.
+        let notification_center: *mut AnyObject = msg_send![ns_workspace, notificationCenter];
+        if notification_center.is_null() {
+            return;
+        }
 
         let _: () = msg_send![notification_center,
-            addObserver: observer_instance
-            selector: sel!(handleNotification:)
-            name: notification_name
-            object: nil
+            addObserver: observer_instance,
+            selector: sel!(handleNotification:),
+            name: ns_string!("NSWorkspaceDidActivateApplicationNotification"),
+            object: std::ptr::null_mut::<AnyObject>()
         ];
 
         let _ = FOCUS_OBSERVER.set(observer_instance as usize);
-    }
+    });
 }
