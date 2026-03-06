@@ -48,10 +48,7 @@ pub fn parse_layers(
 
     for (key, val) in table {
         let key_str = key.to_string();
-        let key_span = SourceSpan::new(
-            key.span.start.into(),
-            key.span.end - key.span.start,
-        );
+        let key_span = SourceSpan::new(key.span.start.into(), key.span.end - key.span.start);
 
         if let Some(inner_table) = val.as_table() {
             let mut layer_binds = HashMap::new();
@@ -73,10 +70,8 @@ pub fn parse_layers(
             // 2. Process the table contents
             for (i_key, i_val) in inner_table {
                 let i_key_str = i_key.to_string();
-                let i_key_span = SourceSpan::new(
-                    i_key.span.start.into(),
-                    i_key.span.end - i_key.span.start,
-                );
+                let i_key_span =
+                    SourceSpan::new(i_key.span.start.into(), i_key.span.end - i_key.span.start);
 
                 if i_val.as_table().is_some() {
                     continue;
@@ -139,8 +134,7 @@ pub fn parse_layers(
                         }
 
                         // It's a binding. Try to parse both sides.
-                        if let Some(trigger) =
-                            parse_keybinding(&i_key_str, i_key_span, errors, ctx)
+                        if let Some(trigger) = parse_keybinding(&i_key_str, i_key_span, errors, ctx)
                             && let Some(action) = parse_action(
                                 i_val,
                                 errors,
@@ -213,10 +207,7 @@ fn parse_timeout_field(
     errors: &mut Vec<ConfigError>,
     ctx: &ValidationContext,
 ) -> Option<u32> {
-    let span = SourceSpan::new(
-        val.span.start.into(),
-        val.span.end - val.span.start,
-    );
+    let span = SourceSpan::new(val.span.start.into(), val.span.end - val.span.start);
 
     if let Some(int_val) = val.as_integer() {
         if int_val >= 0 {
@@ -227,7 +218,9 @@ fn parse_timeout_field(
                 span,
             });
         }
-    } else if let Some(s_val) = val.as_str() && let Ok(parsed) = s_val.parse::<u32>() {
+    } else if let Some(s_val) = val.as_str()
+        && let Ok(parsed) = s_val.parse::<u32>()
+    {
         errors.push(ConfigError::TimeoutCoercion {
             src: ctx.src.clone(),
             span,

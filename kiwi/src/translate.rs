@@ -48,7 +48,8 @@ impl LayoutHandle {
             }
 
             let list: CFArray<CFTypeRef> = CFArray::wrap_under_get_rule(list_ref as CFArrayRef);
-            let property_key = CFString::wrap_under_get_rule(kTISPropertyInputSourceID as CFStringRef);
+            let property_key =
+                CFString::wrap_under_get_rule(kTISPropertyInputSourceID as CFStringRef);
             let requested_layout_id = CFString::new(layout_id);
 
             let mut selected: Option<CFTypeRef> = None;
@@ -83,7 +84,10 @@ impl LayoutHandle {
         let layout_data_property = CFString::new("TISPropertyUnicodeKeyLayoutData");
         let layout_data_ref = unsafe {
             // Property pointer is borrowed from input_source and valid while `self` lives.
-            TISGetInputSourceProperty(self.input_source, layout_data_property.as_concrete_TypeRef())
+            TISGetInputSourceProperty(
+                self.input_source,
+                layout_data_property.as_concrete_TypeRef(),
+            )
         };
         if layout_data_ref.is_null() {
             return None;

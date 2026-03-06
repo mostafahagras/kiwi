@@ -6,20 +6,20 @@ pub mod ffi;
 pub mod hotkey;
 pub mod input;
 pub mod manager;
+mod shell_runtime;
 mod translate;
 pub mod window;
-
-use crate::cli::error::{CliError, CliResult};
 use crate::cli::LogArgs;
-use crate::control::{default_socket_path, spawn_control_server, ControlState};
+use crate::cli::error::{CliError, CliResult};
+use crate::control::{ControlState, default_socket_path, spawn_control_server};
 use crate::event_tap::{CGEventTap, CGEventType};
-use crate::input::{from_cg_code, from_system_defined_event, get_character_from_event, USER_DATA};
+use crate::input::{USER_DATA, from_cg_code, from_system_defined_event, get_character_from_event};
 use crate::manager::RELOAD_REQUESTED;
 use crate::window::focused::init_focus_observer;
 use clap::Parser;
-use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
+use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes};
 use core_graphics::event::{
-    CallbackResult, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, EventField,
+    CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CallbackResult, EventField,
 };
 use kiwi_parser::Config;
 use miette::{Report, miette};
@@ -55,6 +55,8 @@ pub(crate) fn run_daemon(
             "Please grant accessibility permissions before running kiwi daemon",
         ));
     }
+
+    shell_runtime::init_shell_context();
 
     thread::spawn(init_focus_observer);
 
@@ -93,7 +95,7 @@ pub(crate) fn run_daemon(
         socket_path: default_socket_path()?,
     };
     spawn_control_server(control_state)?;
-    
+
     let tap = CGEventTap::new(
         CGEventTapLocation::HID,
         CGEventTapPlacement::HeadInsertEventTap,
@@ -112,7 +114,8 @@ pub(crate) fn run_daemon(
             let flags = event.get_flags();
             let (key, is_down) = match type_ {
                 CGEventType::KeyDown | CGEventType::KeyUp => {
-                    let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                    let key_code =
+                        event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                     let char = get_character_from_event(event);
                     let key = match from_cg_code(key_code as u16, char) {
                         Some(k) => k,
@@ -151,6 +154,7 @@ pub(crate) fn run_daemon(
                     info!("Reloading configuration...");
 
                     RELOAD_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+                    shell_runtime::refresh_path_cache();
                     match parse_config_from_path(&reload_path) {
                         Ok(new_config) => match manager::setup_manager(&new_config) {
                             Ok(new_manager) => {

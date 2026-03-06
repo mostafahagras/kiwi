@@ -28,6 +28,8 @@ kiwi-parser = { path = "../kiwi-parser" }
 miette = { version = "7.5.0", features = ["fancy"] }
 cocoa = "0.25"
 foreign-types = "0.5.0"
+libc = "0.2.177"
+shell-words = "1.1.0"
 
 [lints.rust]
 unexpected_cfgs = "allow"

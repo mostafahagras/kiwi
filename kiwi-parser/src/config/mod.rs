@@ -92,10 +92,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
     if let Some(table) = root.get("mods").and_then(|v| v.as_table()) {
         for (key, val) in table {
             let key_str = key.to_string();
-            let key_span = SourceSpan::new(
-                key.span.start.into(),
-                key.span.end - key.span.start,
-            );
+            let key_span = SourceSpan::new(key.span.start.into(), key.span.end - key.span.start);
 
             if !Modifiers::parse(&key_str).is_empty() {
                 errors.push(ConfigError::InvalidBinding {
@@ -110,10 +107,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
                 continue; // Skip this alias to avoid further confusion
             }
 
-            let val_span = SourceSpan::new(
-                val.span.start.into(),
-                val.span.end - val.span.start,
-            );
+            let val_span = SourceSpan::new(val.span.start.into(), val.span.end - val.span.start);
 
             let raw_parts: Vec<&str> = match val.as_ref() {
                 ValueInner::String(s) => s
@@ -175,10 +169,8 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
         for (key, val) in apps_table {
             let alias_key = key.to_string();
             if let Some(real_name) = val.as_str() {
-                let app_span = SourceSpan::new(
-                    val.span.start.into(),
-                    val.span.end - val.span.start,
-                );
+                let app_span =
+                    SourceSpan::new(val.span.start.into(), val.span.end - val.span.start);
 
                 // Validation logic
                 let is_invalid =

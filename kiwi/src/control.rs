@@ -70,9 +70,7 @@ pub struct ControlState {
 pub fn default_socket_path() -> Result<PathBuf, CliError> {
     let home = std::env::var("HOME")
         .map_err(|_| CliError::new("HOME not set; cannot resolve control socket path"))?;
-    Ok(PathBuf::from(home)
-        .join(".kiwi")
-        .join("kiwi.sock"))
+    Ok(PathBuf::from(home).join(".kiwi").join("kiwi.sock"))
 }
 
 pub fn spawn_control_server(state: ControlState) -> Result<(), CliError> {
@@ -163,7 +161,10 @@ fn handle_request(request: ControlRequest, state: &ControlState) -> ControlRespo
         ControlRequest::Ping => ControlResponse::ok(json!({"pong": true})),
         ControlRequest::Status => {
             let (layers, intercept) = match state.manager.lock() {
-                Ok(mgr) => (mgr.active_layer_names(), intercept_state_label(intercept_state())),
+                Ok(mgr) => (
+                    mgr.active_layer_names(),
+                    intercept_state_label(intercept_state()),
+                ),
                 Err(_) => {
                     return ControlResponse::err("internal", "failed to lock hotkey manager");
                 }
@@ -180,20 +181,23 @@ fn handle_request(request: ControlRequest, state: &ControlState) -> ControlRespo
                 "queue_depth": action_queue_depth(),
             }))
         }
-        ControlRequest::Reload => match crate::parse_config_from_path(&state.config_path) {
-            Ok(config) => match state.manager.lock() {
-                Ok(mut mgr) => match manager::setup_manager(&config) {
-                    Ok(new_manager) => {
-                        *mgr = new_manager;
-                        clear_window_state();
-                        ControlResponse::ok(json!({"reloaded": true}))
-                    }
-                    Err(err) => ControlResponse::err("reload_failed", err),
+        ControlRequest::Reload => {
+            crate::shell_runtime::refresh_path_cache();
+            match crate::parse_config_from_path(&state.config_path) {
+                Ok(config) => match state.manager.lock() {
+                    Ok(mut mgr) => match manager::setup_manager(&config) {
+                        Ok(new_manager) => {
+                            *mgr = new_manager;
+                            clear_window_state();
+                            ControlResponse::ok(json!({"reloaded": true}))
+                        }
+                        Err(err) => ControlResponse::err("reload_failed", err),
+                    },
+                    Err(_) => ControlResponse::err("internal", "failed to lock hotkey manager"),
                 },
-                Err(_) => ControlResponse::err("internal", "failed to lock hotkey manager"),
-            },
-            Err(err) => ControlResponse::err("reload_failed", format!("{err:?}")),
-        },
+                Err(err) => ControlResponse::err("reload_failed", format!("{err:?}")),
+            }
+        }
         ControlRequest::Quit => {
             dispatch_action(Action::Quit);
             ControlResponse::ok(json!({"quitting": true}))

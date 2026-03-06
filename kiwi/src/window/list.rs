@@ -1,6 +1,6 @@
 use crate::ffi::*;
-use core_foundation::base::{CFType, TCFType};
 use core_foundation::array::CFArray;
+use core_foundation::base::{CFType, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
@@ -89,8 +89,8 @@ pub fn dict_to_window_info(dict: &CFDictionary<CFString, CFType>) -> Option<Wind
 
 pub fn current_window_ids() -> Vec<CGWindowID> {
     unsafe {
-        let options =
-            CGWindowListOption::OPTION_ON_SCREEN_ONLY | CGWindowListOption::EXCLUDE_DESKTOP_ELEMENTS;
+        let options = CGWindowListOption::OPTION_ON_SCREEN_ONLY
+            | CGWindowListOption::EXCLUDE_DESKTOP_ELEMENTS;
         let array_ref = CGWindowListCopyWindowInfo(options, 0);
         if array_ref.is_null() {
             return Vec::new();

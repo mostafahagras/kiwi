@@ -50,11 +50,7 @@ impl CGEventType {
 
     const fn to_mask_bit(self) -> CGEventMask {
         let raw = self.as_raw();
-        if raw >= 64 {
-            0
-        } else {
-            1u64 << raw
-        }
+        if raw >= 64 { 0 } else { 1u64 << raw }
     }
 }
 

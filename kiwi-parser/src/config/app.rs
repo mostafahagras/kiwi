@@ -3,7 +3,9 @@ use crate::{
         ValidationContext,
         action::{Action, ParseScope, parse_action},
         binding::parse_keybinding,
-        error::ConfigError, layer::Layer, layer::parse_layers,
+        error::ConfigError,
+        layer::Layer,
+        layer::parse_layers,
     },
     key::KeyBinding,
 };
@@ -27,10 +29,7 @@ pub fn parse_apps(
     for (key, val) in table {
         let key_str = key.to_string();
         let resolved_name = ctx.app_aliases.get(&key_str).cloned().unwrap_or(key_str);
-        let key_span = SourceSpan::new(
-            key.span.start.into(),
-            key.span.end - key.span.start,
-        );
+        let key_span = SourceSpan::new(key.span.start.into(), key.span.end - key.span.start);
 
         if let Some(inner_table) = val.as_table() {
             let mut app_binds = HashMap::new();
@@ -48,10 +47,8 @@ pub fn parse_apps(
             // 2. Process table contents
             for (i_key, i_val) in inner_table {
                 let i_key_str = i_key.to_string();
-                let i_key_span = SourceSpan::new(
-                    i_key.span.start.into(),
-                    i_key.span.end - i_key.span.start,
-                );
+                let i_key_span =
+                    SourceSpan::new(i_key.span.start.into(), i_key.span.end - i_key.span.start);
 
                 // Skip child tables; handled by recursion
                 if i_val.as_table().is_some() {

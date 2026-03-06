@@ -230,8 +230,14 @@ mod tests {
 
     #[test]
     fn parses_keyboard_brightness_aliases() {
-        assert!(matches!(Key::parse("kbrup"), Some(Key::KeyboardBrightnessUp)));
-        assert!(matches!(Key::parse("kbup"), Some(Key::KeyboardBrightnessUp)));
+        assert!(matches!(
+            Key::parse("kbrup"),
+            Some(Key::KeyboardBrightnessUp)
+        ));
+        assert!(matches!(
+            Key::parse("kbup"),
+            Some(Key::KeyboardBrightnessUp)
+        ));
         assert!(matches!(
             Key::parse("kbrdn"),
             Some(Key::KeyboardBrightnessDown)

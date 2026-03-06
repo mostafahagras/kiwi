@@ -1,5 +1,5 @@
-use crate::cli::error::CliResult;
 use crate::cli::CompletionArgs;
+use crate::cli::error::CliResult;
 use clap::CommandFactory;
 use clap_complete::generate;
 

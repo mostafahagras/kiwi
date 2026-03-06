@@ -1,7 +1,7 @@
 use crate::cli::error::{CliError, CliResult};
 use crate::cli::{DaemonArgs, DaemonCommand, LogArgs};
-use std::fs;
 use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -201,8 +201,8 @@ fn update_plist_program_arguments(plist_path: &Path, extra_args: &[&str]) -> Cli
         .find("</string>")
         .ok_or_else(|| CliError::new("plist ProgramArguments executable entry is malformed"))?;
     let first_string_value_start = first_string_start_rel + "<string>".len();
-    let exec = &array_section
-        [first_string_value_start..first_string_value_start + first_string_end_rel];
+    let exec =
+        &array_section[first_string_value_start..first_string_value_start + first_string_end_rel];
 
     let mut new_array = String::from("<array><string>");
     new_array.push_str(exec);

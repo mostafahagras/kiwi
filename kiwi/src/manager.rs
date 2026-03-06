@@ -1,6 +1,9 @@
 use crate::hotkey::{HotkeyManager, HotkeyStep, LayerBehavior};
+use crate::shell_runtime;
 use crate::window;
-use kiwi_parser::{Action, Config, Key, KeyBinding, Layer, LayerTargetScope, Modifiers, Resize, Snap};
+use kiwi_parser::{
+    Action, Config, Key, KeyBinding, Layer, LayerTargetScope, Modifiers, Resize, Snap,
+};
 use std::collections::{HashMap, HashSet};
 use std::process::Command as ShellCommand;
 use std::sync::mpsc::{self, Sender};
@@ -163,7 +166,11 @@ fn prune_window_state() {
     }
 }
 
-fn trim_window_state(state: &mut HashMap<u32, CGRect>, live_ids: &HashSet<u32>, max_entries: usize) {
+fn trim_window_state(
+    state: &mut HashMap<u32, CGRect>,
+    live_ids: &HashSet<u32>,
+    max_entries: usize,
+) {
     state.retain(|window_id, _| live_ids.contains(window_id));
 
     while state.len() > max_entries {
@@ -187,7 +194,7 @@ pub fn handle_action(action: &Action) {
             if let Some(app_name) = cmd.strip_prefix("open -a ") {
                 launch_app(app_name.trim());
             } else {
-                ShellCommand::new("sh").arg("-c").arg(cmd).status().ok();
+                shell_runtime::execute_user_command(cmd);
             }
         }
         Action::Remap(binding) => {
@@ -648,11 +655,7 @@ pub fn setup_manager(config: &Config) -> Result<HotkeyManager, String> {
     for (binding, action) in &config.global_binds {
         let step = HotkeyStep::new(binding.key.clone(), binding.modifiers);
         register_key_usage(&mut seen, None, &step, KeyUsageKind::Binding)?;
-        manager.bind(
-            vec![step],
-            None,
-            action.clone(),
-        );
+        manager.bind(vec![step], None, action.clone());
     }
 
     // 2. Layers
@@ -673,17 +676,8 @@ pub fn setup_manager(config: &Config) -> Result<HotkeyManager, String> {
         // App binds
         for (binding, action) in &app_config.binds {
             let step = HotkeyStep::new(binding.key.clone(), binding.modifiers);
-            register_key_usage(
-                &mut seen,
-                Some(app_name),
-                &step,
-                KeyUsageKind::Binding,
-            )?;
-            manager.bind(
-                vec![step],
-                Some(app_name.clone()),
-                action.clone(),
-            );
+            register_key_usage(&mut seen, Some(app_name), &step, KeyUsageKind::Binding)?;
+            manager.bind(vec![step], Some(app_name.clone()), action.clone());
         }
         // App layers
         for (trigger, layer) in &app_config.children {
@@ -766,13 +760,13 @@ mod tests {
     use super::setup_manager;
     use super::trim_window_state;
     use super::{
-        activate_intercept_mode, get_intercept_mode, intercept_decision, InterceptDecision,
-        InterceptKind,
+        InterceptDecision, InterceptKind, activate_intercept_mode, get_intercept_mode,
+        intercept_decision,
     };
-    use kiwi_parser::{Key, KeyBinding, Modifiers};
-    use std::path::PathBuf;
     use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
+    use kiwi_parser::{Key, KeyBinding, Modifiers};
     use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
     use std::sync::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -830,7 +824,10 @@ mod tests {
         assert!(matches!(decision, InterceptDecision::DropWithoutProcessing));
 
         let down_exit = intercept_decision(&Key::Char('x'), Modifiers::COMMAND, true);
-        assert!(matches!(down_exit, InterceptDecision::DropWithoutProcessing));
+        assert!(matches!(
+            down_exit,
+            InterceptDecision::DropWithoutProcessing
+        ));
 
         let up_exit = intercept_decision(&Key::Char('x'), Modifiers::NONE, false);
         assert!(matches!(up_exit, InterceptDecision::DropWithoutProcessing));
@@ -856,7 +853,10 @@ mod tests {
         assert!(matches!(decision, InterceptDecision::KeepWithoutProcessing));
 
         let down_exit = intercept_decision(&Key::Char('q'), Modifiers::CONTROL, true);
-        assert!(matches!(down_exit, InterceptDecision::DropWithoutProcessing));
+        assert!(matches!(
+            down_exit,
+            InterceptDecision::DropWithoutProcessing
+        ));
 
         let up_exit = intercept_decision(&Key::Char('q'), Modifiers::NONE, false);
         assert!(matches!(up_exit, InterceptDecision::DropWithoutProcessing));

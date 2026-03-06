@@ -1,15 +1,15 @@
 use crate::ffi::CGEventKeyboardGetUnicodeString;
 use core::ffi::c_void;
-use foreign_types::ForeignType;
 use core_graphics::display::CGPoint;
 use core_graphics::event::CGEventTapLocation;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventType, CGKeyCode, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use foreign_types::ForeignType;
 use kiwi_parser::{Key, KeyBinding, Modifiers};
-use tracing::info;
-use std::ffi::{c_double, c_int};
 use std::cell::RefCell;
+use std::ffi::{c_double, c_int};
 use std::time::Duration;
+use tracing::info;
 
 pub const USER_DATA: i64 = 0x6B697769; // "kiwi" in hexadecimal
 
@@ -171,11 +171,7 @@ fn press_media_key(media_keycode: c_int, modifiers: Modifiers) {
 
             if !event.is_null() {
                 let cg_event = get_cg_event(event, sel_cg_event);
-                CGEventSetIntegerValueField(
-                    cg_event,
-                    CG_EVENT_SOURCE_USER_DATA_FIELD,
-                    USER_DATA,
-                );
+                CGEventSetIntegerValueField(cg_event, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
                 CGEventPost(0, cg_event);
             }
         }
@@ -188,20 +184,12 @@ fn press_virtual_key(code: u16) {
         let up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), code, false);
 
         if !down.is_null() {
-            CGEventSetIntegerValueField(
-                down,
-                CG_EVENT_SOURCE_USER_DATA_FIELD,
-                USER_DATA,
-            );
+            CGEventSetIntegerValueField(down, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
             CGEventPost(0, down);
             CFRelease(down);
         }
         if !up.is_null() {
-            CGEventSetIntegerValueField(
-                up,
-                CG_EVENT_SOURCE_USER_DATA_FIELD,
-                USER_DATA,
-            );
+            CGEventSetIntegerValueField(up, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
             CGEventPost(0, up);
             CFRelease(up);
         }
@@ -267,11 +255,7 @@ pub fn type_unicode_string(text: &str) {
                 continue;
             }
 
-            CGEventSetIntegerValueField(
-                event,
-                CG_EVENT_SOURCE_USER_DATA_FIELD,
-                USER_DATA,
-            );
+            CGEventSetIntegerValueField(event, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
             CGEventKeyboardSetUnicodeString(event, utf16.len() as u64, utf16.as_ptr());
             CGEventPost(0, event);
             CFRelease(event);
@@ -493,7 +477,8 @@ pub fn from_system_defined_event(event: &CGEvent) -> Option<(Key, bool)> {
         let sel_subtype = sel_registerName(b"subtype\0".as_ptr());
         let sel_data1 = sel_registerName(b"data1\0".as_ptr());
 
-        type EventWithCgFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
+        type EventWithCgFn =
+            unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
         let event_with_cg: EventWithCgFn = std::mem::transmute(objc_msgSend as *const ());
 
         type SubtypeFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> i16;
@@ -502,7 +487,11 @@ pub fn from_system_defined_event(event: &CGEvent) -> Option<(Key, bool)> {
         type Data1Fn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> isize;
         let data1_fn: Data1Fn = std::mem::transmute(objc_msgSend as *const ());
 
-        let ns_event = event_with_cg(ns_event_class, sel_event_with_cg, event.as_ptr() as *mut c_void);
+        let ns_event = event_with_cg(
+            ns_event_class,
+            sel_event_with_cg,
+            event.as_ptr() as *mut c_void,
+        );
         if ns_event.is_null() {
             return None;
         }

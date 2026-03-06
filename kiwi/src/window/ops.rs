@@ -68,12 +68,11 @@ pub fn toggle_native_fullscreen() -> bool {
         let attr = k_ax_full_screen_attribute();
         let mut value: CFTypeRef = std::ptr::null();
 
-        let result =
-            AXUIElementCopyAttributeValue(
-                window_ref.as_cf_type_ref(),
-                attr.as_concrete_TypeRef(),
-                &mut value,
-            );
+        let result = AXUIElementCopyAttributeValue(
+            window_ref.as_cf_type_ref(),
+            attr.as_concrete_TypeRef(),
+            &mut value,
+        );
         let mut current_state = false;
         if result == AXError::Success && !value.is_null() {
             current_state = value == kCFBooleanTrue;
@@ -88,12 +87,11 @@ pub fn toggle_native_fullscreen() -> bool {
             kCFBooleanFalse
         };
 
-        let set_result =
-            AXUIElementSetAttributeValue(
-                window_ref.as_cf_type_ref(),
-                attr.as_concrete_TypeRef(),
-                val_ref,
-            );
+        let set_result = AXUIElementSetAttributeValue(
+            window_ref.as_cf_type_ref(),
+            attr.as_concrete_TypeRef(),
+            val_ref,
+        );
         set_result == AXError::Success
     }
 }

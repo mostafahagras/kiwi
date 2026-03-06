@@ -296,8 +296,8 @@ mod tests {
 
     #[test]
     fn parse_daemon_restart_with_trace() {
-        let cli = Cli::try_parse_from(["kiwi", "daemon", "restart", "--trace"])
-            .expect("should parse");
+        let cli =
+            Cli::try_parse_from(["kiwi", "daemon", "restart", "--trace"]).expect("should parse");
         match cli.command {
             Some(Commands::Daemon(args)) => {
                 assert!(args.log.trace);

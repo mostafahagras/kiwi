@@ -996,7 +996,9 @@ mod tests {
             },
         );
 
-        let err = mgr.resolve_layer_target_name("tabs", None).expect_err("must fail");
+        let err = mgr
+            .resolve_layer_target_name("tabs", None)
+            .expect_err("must fail");
         assert!(err.contains("unknown global layer target"));
     }
 }

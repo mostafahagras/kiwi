@@ -16,7 +16,8 @@ pub fn run() -> CliResult<()> {
     }
 
     // 1. Setup Configuration
-    let is_root = get_uid().map_err(|e| CliError::new(format!("failed to resolve uid: {e}")))? == "0";
+    let is_root =
+        get_uid().map_err(|e| CliError::new(format!("failed to resolve uid: {e}")))? == "0";
     let mode = if is_root {
         InstallMode::Root
     } else {

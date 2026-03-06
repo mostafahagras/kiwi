@@ -8,9 +8,9 @@ use crate::config::{
 };
 use crate::key::{KeyBinding, Modifiers};
 use miette::{NamedSource, SourceSpan};
-use std::collections::HashMap;
 pub use resize::Resize;
 pub use snap::Snap;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use toml_span::value::ValueInner;
 
@@ -81,10 +81,7 @@ pub fn parse_action(
     ctx: &ValidationContext,
     scope: ParseScope<'_>,
 ) -> Option<Action> {
-    let span = SourceSpan::new(
-        value.span.start.into(),
-        value.span.end - value.span.start,
-    );
+    let span = SourceSpan::new(value.span.start.into(), value.span.end - value.span.start);
 
     match value.as_ref() {
         // Case A: A single action string (e.g., "snap:left")
@@ -184,7 +181,9 @@ fn parse_single_action_string(
         });
     }
 
-    if let Some((prefix, payload)) = trimmed.split_once(':') && !prefix.contains(char::is_whitespace) {
+    if let Some((prefix, payload)) = trimmed.split_once(':')
+        && !prefix.contains(char::is_whitespace)
+    {
         let payload = payload.trim();
         match prefix {
             "shell" => Some(Action::Shell(payload.to_string())),
@@ -361,7 +360,7 @@ pub fn parse_action_str(raw: &str) -> Result<Action, String> {
             app_name: None,
         },
     )
-        .ok_or_else(|| "invalid action".to_string())?;
+    .ok_or_else(|| "invalid action".to_string())?;
 
     if let Some(err) = errors.first() {
         return Err(format!("{err}"));
