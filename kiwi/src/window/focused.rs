@@ -169,7 +169,8 @@ extern "C" fn handle_notification(_this: *mut AnyObject, _sel: Sel, notification
             return;
         }
 
-        let app: *mut AnyObject = msg_send![user_info, objectForKey: ns_string!("NSWorkspaceApplicationKey")];
+        let app: *mut AnyObject =
+            msg_send![user_info, objectForKey: ns_string!("NSWorkspaceApplicationKey")];
         update_focused_app(app);
     }
 }

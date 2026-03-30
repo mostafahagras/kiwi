@@ -145,7 +145,12 @@ impl HotkeyManager {
         }
     }
 
-    pub fn bind(&mut self, sequence: Vec<HotkeyStep>, context: Option<AppSelector>, action: Action) {
+    pub fn bind(
+        &mut self,
+        sequence: Vec<HotkeyStep>,
+        context: Option<AppSelector>,
+        action: Action,
+    ) {
         let mut node = &mut self.root;
         for step in sequence {
             node = node.children.entry(step).or_default();
@@ -217,9 +222,7 @@ impl HotkeyManager {
         let mut full_path = path.to_vec();
         full_path.push(step.clone());
 
-        if let Some(layer_behavior) =
-            select_app_scoped(&node.app_layer_behaviors, current_app)
-        {
+        if let Some(layer_behavior) = select_app_scoped(&node.app_layer_behaviors, current_app) {
             return Some(LookupHit {
                 full_path,
                 action: None,
@@ -546,7 +549,10 @@ impl HotkeyManager {
                 hits.sort_by(|a, b| a.0.cmp(&b.0));
                 return Err(format!(
                     "ambiguous layer target '{target}', matches: {}",
-                    hits.into_iter().map(|hit| hit.0).collect::<Vec<_>>().join(", ")
+                    hits.into_iter()
+                        .map(|hit| hit.0)
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ));
             }
             return Ok(hits.into_iter().next().map(|hit| hit.0));

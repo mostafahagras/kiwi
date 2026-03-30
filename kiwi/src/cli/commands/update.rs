@@ -1,6 +1,6 @@
-use crate::cli::error::{CliError, CliResult};
-use crate::cli::commands::install;
 use crate::cli::UpdateArgs;
+use crate::cli::commands::install;
+use crate::cli::error::{CliError, CliResult};
 use std::path::Path;
 use std::process::Command;
 

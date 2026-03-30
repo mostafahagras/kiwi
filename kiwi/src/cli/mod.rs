@@ -312,8 +312,7 @@ mod tests {
 
     #[test]
     fn parse_root_config_override() {
-        let cli = Cli::try_parse_from(["kiwi", "--config", "./config.toml"])
-            .expect("should parse");
+        let cli = Cli::try_parse_from(["kiwi", "--config", "./config.toml"]).expect("should parse");
         assert!(cli.command.is_none());
         assert_eq!(
             cli.config.as_deref(),
