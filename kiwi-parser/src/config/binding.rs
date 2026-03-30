@@ -175,6 +175,7 @@ mod tests {
             modifier_map,
             modifier_names: Vec::new(),
             app_aliases: HashMap::new(),
+            app_groups: HashMap::new(),
         }
     }
 

@@ -266,11 +266,11 @@ pub fn handle_action(action: &Action) {
             if let Some(shared) = SHARED_MANAGER.get()
                 && let Ok(mut mgr) = shared.lock()
             {
+                let current_app = crate::window::get_focused_app();
                 let app_scope = match scope {
                     LayerTargetScope::GlobalOnly => None,
-                    LayerTargetScope::App(app) => Some(app.as_str()),
+                    LayerTargetScope::AppCurrent => Some(current_app.as_str()),
                 };
-                let current_app = crate::window::get_focused_app();
                 match mgr.resolve_layer_target_name(target, app_scope) {
                     Ok(layer_name) => {
                         if let Err(e) = mgr.activate_layer(&layer_name, &current_app) {
@@ -665,6 +665,7 @@ pub fn setup_manager(config: &Config) -> Result<HotkeyManager, String> {
             &mut seen,
             Vec::new(),
             None,
+            None,
             String::new(),
             trigger,
             layer,
@@ -672,12 +673,15 @@ pub fn setup_manager(config: &Config) -> Result<HotkeyManager, String> {
     }
 
     // 3. Apps
-    for (app_name, app_config) in &config.apps {
+    for entry in &config.apps {
+        let selector = entry.selector.clone();
+        let label = entry.label.clone();
+        let app_config = &entry.app;
         // App binds
         for (binding, action) in &app_config.binds {
             let step = HotkeyStep::new(binding.key.clone(), binding.modifiers);
-            register_key_usage(&mut seen, Some(app_name), &step, KeyUsageKind::Binding)?;
-            manager.bind(vec![step], Some(app_name.clone()), action.clone());
+            register_key_usage(&mut seen, Some(&label), &step, KeyUsageKind::Binding)?;
+            manager.bind(vec![step], Some(selector.clone()), action.clone());
         }
         // App layers
         for (trigger, layer) in &app_config.children {
@@ -685,8 +689,9 @@ pub fn setup_manager(config: &Config) -> Result<HotkeyManager, String> {
                 &mut manager,
                 &mut seen,
                 Vec::new(),
-                Some(app_name.clone()),
-                format!("app:{app_name}"),
+                Some(selector.clone()),
+                Some(label.clone()),
+                format!("app:{label}"),
                 trigger,
                 layer,
             )?;
@@ -700,7 +705,8 @@ fn register_layer(
     manager: &mut HotkeyManager,
     seen: &mut HashMap<(Option<String>, HotkeyStep), KeyUsageKind>,
     prefix: Vec<HotkeyStep>,
-    context: Option<String>,
+    selector: Option<kiwi_parser::AppSelector>,
+    scope_label: Option<String>,
     name_prefix: String,
     trigger: &KeyBinding,
     layer: &Layer,
@@ -709,7 +715,7 @@ fn register_layer(
     let activation_step = HotkeyStep::new(trigger.key.clone(), trigger.modifiers);
     register_key_usage(
         seen,
-        context.as_deref(),
+        scope_label.as_deref(),
         &activation_step,
         KeyUsageKind::LayerActivation,
     )?;
@@ -730,13 +736,18 @@ fn register_layer(
             .as_ref()
             .map(|k| HotkeyStep::new(k.key.clone(), k.modifiers)),
     };
-    manager.register_layer(layer_prefix.clone(), context.clone(), behavior);
+    manager.register_layer(
+        layer_prefix.clone(),
+        selector.clone(),
+        scope_label.clone(),
+        behavior,
+    );
 
     // Layer binds
     for (binding, action) in &layer.binds {
         let mut sequence = layer_prefix.clone();
         sequence.push(HotkeyStep::new(binding.key.clone(), binding.modifiers));
-        manager.bind(sequence, context.clone(), action.clone());
+        manager.bind(sequence, selector.clone(), action.clone());
     }
 
     // Nested layers
@@ -745,7 +756,8 @@ fn register_layer(
             manager,
             seen,
             layer_prefix.clone(),
-            context.clone(),
+            selector.clone(),
+            scope_label.clone(),
             layer_name.clone(),
             trigger,
             child_layer,

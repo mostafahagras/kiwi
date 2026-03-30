@@ -61,6 +61,39 @@ pub enum ConfigError {
         #[help]
         help: String,
     },
+    #[error("Invalid app selector: '{selector}'")]
+    #[diagnostic(code(config::invalid_app_selector))]
+    InvalidAppSelector {
+        #[source_code]
+        src: NamedSource<String>,
+        selector: String,
+        #[label("invalid selector syntax")]
+        span: SourceSpan,
+        #[help]
+        help: String,
+    },
+    #[error("Unknown app group: '{group}'")]
+    #[diagnostic(
+        code(config::unknown_app_group),
+        help("Add '{group} = [...]' to your [apps] table first.")
+    )]
+    UnknownAppGroup {
+        #[source_code]
+        src: NamedSource<String>,
+        group: String,
+        #[label("this app group is not defined")]
+        span: SourceSpan,
+    },
+    #[error("Invalid app group entry in '{group}'")]
+    #[diagnostic(code(config::invalid_app_group_entry))]
+    InvalidAppGroupEntry {
+        #[source_code]
+        src: NamedSource<String>,
+        group: String,
+        #[label("{message}")]
+        span: SourceSpan,
+        message: String,
+    },
     #[error("Unoptimized modifier combination")]
     #[diagnostic(
         code(config::unoptimized_bind),

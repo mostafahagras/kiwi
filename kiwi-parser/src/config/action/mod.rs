@@ -17,7 +17,7 @@ use toml_span::value::ValueInner;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayerTargetScope {
     GlobalOnly,
-    App(String),
+    AppCurrent,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -172,7 +172,7 @@ fn parse_single_action_string(
         }
 
         let resolved_scope = match scope.app_name {
-            Some(name) => LayerTargetScope::App(name.to_string()),
+            Some(_) => LayerTargetScope::AppCurrent,
             None => LayerTargetScope::GlobalOnly,
         };
         return Some(Action::LayerActivate {
@@ -346,6 +346,7 @@ pub fn parse_action_str(raw: &str) -> Result<Action, String> {
         modifier_map: &modifier_map,
         modifier_names: Vec::new(),
         app_aliases: HashMap::new(),
+        app_groups: HashMap::new(),
     };
 
     let mut errors = Vec::new();

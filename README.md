@@ -118,7 +118,7 @@ Top-level sections:
 - `layout = "..."` (optional keyboard layout id/alias)
 - `[mods]` (optional modifier aliases)
 - `[binds]` global bindings
-- `[apps]` optional app aliases
+- `[apps]` optional app aliases and groups
 - `[app."App Name"]` app-specific bindings
 - `[layer.<name>]` layers (supports nesting)
 
@@ -141,6 +141,29 @@ chrome = "Google Chrome"
 [app."Google Chrome"]
 "hyper+w" = "remap:cmd+w"
 ```
+
+## App Groups And Selectors
+
+You can define app groups in `[apps]` using arrays, and then use selectors in `[app.<selector>]`.
+
+```toml
+[apps]
+tabs = ["Ghostty", "Safari", "Terminal", "Google Chrome"]
+
+[app.tabs]
+"hyper+t" = "cmd+t"
+
+[app."any(tabs, Finder)"]
+"hyper+w" = "cmd+w"
+
+[app."not(tabs)"]
+"hyper+r" = "reload"
+```
+
+Selector matching:
+- `Exact` app name beats `any(...)` or group matches.
+- `any(...)`/group beats `not(...)`.
+- If specificity is equal, the last matching block wins.
 
 ## Binding Syntax
 

@@ -4,11 +4,12 @@ pub mod binding;
 pub mod error;
 pub mod layer;
 mod utils;
+pub use app::{AppEntry, AppSelector};
 
 use crate::{
     config::{
         action::{Action, ParseScope, parse_action},
-        app::{App, parse_apps},
+        app::parse_apps,
         binding::parse_keybinding,
         error::{ConfigError, MultiConfigError},
         layer::Layer,
@@ -28,7 +29,7 @@ pub struct Config {
     pub layout: Option<String>,
     pub global_binds: HashMap<KeyBinding, Action>,
     pub layers: HashMap<KeyBinding, Layer>,
-    pub apps: HashMap<String, App>,
+    pub apps: Vec<AppEntry>,
 }
 
 pub struct ValidationContext<'a> {
@@ -38,6 +39,7 @@ pub struct ValidationContext<'a> {
     /// Simple list of alias names for fuzzy matching (e.g., ["hyper", "meh"])
     pub modifier_names: Vec<String>,
     pub app_aliases: HashMap<String, String>,
+    pub app_groups: HashMap<String, Vec<String>>,
 }
 
 pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
@@ -165,28 +167,73 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 
     // --- 3. Parse and Validate App Aliases ---
     let mut app_aliases = HashMap::new();
+    let mut app_groups = HashMap::new();
     if let Some(apps_table) = root.get("apps").and_then(|v| v.as_table()) {
         for (key, val) in apps_table {
             let alias_key = key.to_string();
-            if let Some(real_name) = val.as_str() {
-                let app_span =
-                    SourceSpan::new(val.span.start.into(), val.span.end - val.span.start);
+            match val.as_ref() {
+                ValueInner::String(real_name) => {
+                    let app_span =
+                        SourceSpan::new(val.span.start.into(), val.span.end - val.span.start);
 
-                // Validation logic
-                let is_invalid =
-                    real_name.is_empty() || real_name.contains('/') || real_name.trim().is_empty();
+                    let is_invalid = real_name.is_empty()
+                        || real_name.contains('/')
+                        || real_name.trim().is_empty();
 
-                if is_invalid {
-                    errors.push(ConfigError::InvalidAppName {
+                    if is_invalid {
+                        errors.push(ConfigError::InvalidAppName {
+                            src: src.clone(),
+                            name: real_name.to_string(),
+                            span: app_span,
+                            help: "Invalid app name".into(),
+                        });
+                        continue;
+                    }
+
+                    // Map: "chrome" -> "Google Chrome"
+                    app_aliases.insert(alias_key, real_name.to_string());
+                }
+                ValueInner::Array(items) => {
+                    let mut group = Vec::new();
+                    for item in items {
+                        let item_span = SourceSpan::new(
+                            item.span.start.into(),
+                            item.span.end - item.span.start,
+                        );
+                        let Some(name) = item.as_str() else {
+                            errors.push(ConfigError::InvalidAppGroupEntry {
+                                src: src.clone(),
+                                group: alias_key.clone(),
+                                span: item_span,
+                                message: "Group entries must be strings".into(),
+                            });
+                            continue;
+                        };
+                        let is_invalid =
+                            name.is_empty() || name.contains('/') || name.trim().is_empty();
+                        if is_invalid {
+                            errors.push(ConfigError::InvalidAppGroupEntry {
+                                src: src.clone(),
+                                group: alias_key.clone(),
+                                span: item_span,
+                                message: "Invalid app name in group".into(),
+                            });
+                            continue;
+                        }
+                        group.push(name.to_string());
+                    }
+                    app_groups.insert(alias_key, group);
+                }
+                _ => {
+                    let app_span =
+                        SourceSpan::new(val.span.start.into(), val.span.end - val.span.start);
+                    errors.push(ConfigError::InvalidAppGroupEntry {
                         src: src.clone(),
-                        name: real_name.to_string(),
+                        group: alias_key.clone(),
                         span: app_span,
-                        help: "Invalid app name".into(),
+                        message: "App alias must be a string or array of strings".into(),
                     });
                 }
-
-                // Map: "chrome" -> "Google Chrome"
-                app_aliases.insert(alias_key, real_name.to_string());
             }
         }
     }
@@ -196,6 +243,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
         modifier_map: &resolved_aliases,
         modifier_names: resolved_aliases.values().map(|v| v.0.clone()).collect(),
         app_aliases,
+        app_groups,
     };
 
     // --- 4. Parse Global Binds ---
@@ -236,7 +284,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 
     let apps = match root.get("app").and_then(|v| v.as_table()) {
         Some(apps_table) => parse_apps(apps_table, &mut errors, &ctx, 0),
-        None => HashMap::new(),
+        None => Vec::new(),
     };
 
     if !errors.is_empty() {
@@ -404,6 +452,91 @@ activate = "cmd+m"
         let raw = r#"
 [app.Ghostty]
 "cmd+j" = "layer:kiwi"
+"#;
+        assert!(parse_config(raw, PathBuf::from("test.toml")).is_err());
+    }
+
+    #[test]
+    fn app_group_alias_parses_into_selector() {
+        let raw = r#"
+[apps]
+tabs = ["Ghostty", "Safari", "Terminal"]
+
+[app.tabs]
+"cmd+t" = "reload"
+"#;
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        assert_eq!(config.apps.len(), 1);
+        let entry = &config.apps[0];
+        assert_eq!(entry.label, "tabs");
+        match &entry.selector {
+            super::AppSelector::Any(items) => {
+                assert_eq!(
+                    items,
+                    &vec![
+                        "Ghostty".to_string(),
+                        "Safari".to_string(),
+                        "Terminal".to_string()
+                    ]
+                );
+            }
+            _ => panic!("expected any selector"),
+        }
+    }
+
+    #[test]
+    fn any_selector_expands_groups_and_names() {
+        let raw = r#"
+[apps]
+tabs = ["Ghostty", "Safari"]
+
+[app."any(tabs, Terminal)"]
+"cmd+t" = "reload"
+"#;
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let entry = &config.apps[0];
+        match &entry.selector {
+            super::AppSelector::Any(items) => {
+                assert_eq!(
+                    items,
+                    &vec![
+                        "Ghostty".to_string(),
+                        "Safari".to_string(),
+                        "Terminal".to_string()
+                    ]
+                );
+            }
+            _ => panic!("expected any selector"),
+        }
+    }
+
+    #[test]
+    fn not_selector_parses_group() {
+        let raw = r#"
+[apps]
+tabs = ["Ghostty"]
+
+[app."not(tabs)"]
+"cmd+t" = "reload"
+"#;
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let entry = &config.apps[0];
+        match &entry.selector {
+            super::AppSelector::Not(inner) => match inner.as_ref() {
+                super::AppSelector::Any(items) => {
+                    assert_eq!(items, &vec!["Ghostty".to_string()]);
+                }
+                _ => panic!("expected any selector inside not"),
+            },
+            _ => panic!("expected not selector"),
+        }
+    }
+
+    #[test]
+    fn invalid_any_selector_errors() {
+        let raw = r#"
+[app."any()"]
+"cmd+t" = "reload"
 "#;
         assert!(parse_config(raw, PathBuf::from("test.toml")).is_err());
     }
