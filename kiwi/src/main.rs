@@ -33,7 +33,7 @@ fn main() {
 
     let result = match cli.command {
         Some(command) => cli::run(command),
-        None => run_daemon(None, cli.log),
+        None => run_daemon(cli.config, cli.log),
     };
 
     if let Err(err) = result {

@@ -13,6 +13,9 @@ use crate::cli::error::CliResult;
 pub struct Cli {
     #[command(flatten)]
     pub log: LogArgs,
+    /// Config file path override (used when running the daemon directly)
+    #[arg(long, global = true)]
+    pub config: Option<PathBuf>,
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -305,5 +308,16 @@ mod tests {
             }
             _ => panic!("expected daemon command"),
         }
+    }
+
+    #[test]
+    fn parse_root_config_override() {
+        let cli = Cli::try_parse_from(["kiwi", "--config", "./config.toml"])
+            .expect("should parse");
+        assert!(cli.command.is_none());
+        assert_eq!(
+            cli.config.as_deref(),
+            Some(PathBuf::from("./config.toml").as_path())
+        );
     }
 }

@@ -35,6 +35,7 @@ cargo run -p kiwi --release
 Common commands:
 
 ```bash
+kiwi --config /path/to/config.toml
 kiwi install     # alias: kiwi i
 kiwi update [--path /path/to/kiwi]
 kiwi daemon start|stop|restart|status [--plist /path/to/com.example.kiwi.plist]
@@ -105,8 +106,9 @@ kiwi completions fish > ~/.config/fish/completions/kiwi.fish
 ## Config File Resolution
 
 Kiwi loads config from:
-1. `~/.kiwi/config.toml`
-2. `./config.toml` (fallback)
+1. `--config /path/to/config.toml` (when running the daemon directly)
+2. `~/.kiwi/config.toml`
+3. `./config.toml` (fallback)
 
 If neither exists, startup fails.
 
