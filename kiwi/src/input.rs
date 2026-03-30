@@ -10,6 +10,8 @@ use foreign_types::ForeignType;
 use kiwi_parser::{Key, KeyBinding, Modifiers};
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
+use objc2_app_kit::NSEvent;
+use objc2_core_graphics::CGEvent as Objc2CGEvent;
 use objc2_foundation::NSPoint;
 use std::cell::RefCell;
 use std::ffi::c_int;
@@ -139,9 +141,17 @@ fn press_media_key(media_keycode: c_int, modifiers: Modifiers) {
             ];
 
             if !event.is_null() {
-                let cg_event: *mut c_void = msg_send![event, CGEvent];
-                CGEventSetIntegerValueField(cg_event, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
-                CGEventPost(0, cg_event);
+                let ns_event: &NSEvent = &*(event as *mut NSEvent);
+                if let Some(cg_event) = ns_event.CGEvent() {
+                    let cg_event_ptr =
+                        objc2::rc::Retained::<Objc2CGEvent>::as_ptr(&cg_event) as *mut c_void;
+                    CGEventSetIntegerValueField(
+                        cg_event_ptr,
+                        CG_EVENT_SOURCE_USER_DATA_FIELD,
+                        USER_DATA,
+                    );
+                    CGEventPost(0, cg_event_ptr);
+                }
             }
         }
     }
@@ -428,43 +438,40 @@ pub fn get_character_from_event(event: &CGEvent) -> Option<char> {
 }
 
 pub fn from_system_defined_event(event: &CGEvent) -> Option<(Key, bool)> {
-    unsafe {
-        let ns_event: *mut AnyObject =
-            msg_send![class!(NSEvent), eventWithCGEvent: event.as_ptr() as *mut c_void];
-        if ns_event.is_null() {
-            return None;
-        }
+    let cg_event: &Objc2CGEvent = unsafe { &*(event.as_ptr() as *const Objc2CGEvent) };
+    let ns_event = match NSEvent::eventWithCGEvent(cg_event) {
+        Some(event) => event,
+        None => return None,
+    };
 
-        // Subtype 8 is for aux control buttons / media keys.
-        let subtype: i16 = msg_send![ns_event, subtype];
-        if subtype != 8 {
-            return None;
-        }
-
-        let data1: isize = msg_send![ns_event, data1];
-        let data1 = data1 as i64;
-        let key_type = ((data1 >> 16) & 0xFFFF) as i32;
-        let key_state = (data1 & 0xFF00) as i32;
-        let is_down = match key_state {
-            0xA00 => true,
-            0xB00 => false,
-            _ => return None,
-        };
-
-        let key = match key_type {
-            0 => Key::VolumeUp,
-            1 => Key::VolumeDown,
-            2 => Key::BrightnessUp,
-            3 => Key::BrightnessDown,
-            7 => Key::Mute,
-            16 => Key::PlayPause,
-            17 => Key::NextTrack,
-            18 => Key::PrevTrack,
-            21 => Key::KeyboardBrightnessUp,
-            22 => Key::KeyboardBrightnessDown,
-            _ => return None,
-        };
-
-        Some((key, is_down))
+    // Subtype 8 is for aux control buttons / media keys.
+    let subtype = ns_event.subtype().0;
+    if subtype != 8 {
+        return None;
     }
+
+    let data1 = ns_event.data1() as i64;
+    let key_type = ((data1 >> 16) & 0xFFFF) as i32;
+    let key_state = (data1 & 0xFF00) as i32;
+    let is_down = match key_state {
+        0xA00 => true,
+        0xB00 => false,
+        _ => return None,
+    };
+
+    let key = match key_type {
+        0 => Key::VolumeUp,
+        1 => Key::VolumeDown,
+        2 => Key::BrightnessUp,
+        3 => Key::BrightnessDown,
+        7 => Key::Mute,
+        16 => Key::PlayPause,
+        17 => Key::NextTrack,
+        18 => Key::PrevTrack,
+        21 => Key::KeyboardBrightnessUp,
+        22 => Key::KeyboardBrightnessDown,
+        _ => return None,
+    };
+
+    Some((key, is_down))
 }
