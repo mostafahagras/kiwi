@@ -27,9 +27,16 @@ use utils::suggest_best_match;
 #[derive(Debug)]
 pub struct Config {
     pub layout: Option<String>,
+    pub menubar: MenubarConfig,
     pub global_binds: HashMap<KeyBinding, Action>,
     pub layers: HashMap<KeyBinding, Layer>,
     pub apps: Vec<AppEntry>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MenubarConfig {
+    pub enabled: bool,
+    pub max_len: usize,
 }
 
 pub struct ValidationContext<'a> {
@@ -85,6 +92,71 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
                     });
                 }
             }
+        }
+    }
+
+    // --- Menubar Validation ---
+    let mut menubar = MenubarConfig {
+        enabled: false,
+        max_len: 32,
+    };
+    if let Some(menubar_val) = root.get("menubar") {
+        let m_span = SourceSpan::new(
+            menubar_val.span.start.into(),
+            menubar_val.span.end - menubar_val.span.start,
+        );
+        if let Some(flag) = menubar_val.as_bool() {
+            menubar.enabled = flag;
+        } else if let Some(table) = menubar_val.as_table() {
+            if let Some(enabled_val) = table.get("enabled") {
+                if let Some(flag) = enabled_val.as_bool() {
+                    menubar.enabled = flag;
+                } else {
+                    errors.push(ConfigError::InvalidMenubarField {
+                        src: src.clone(),
+                        field: "enabled".into(),
+                        span: SourceSpan::new(
+                            enabled_val.span.start.into(),
+                            enabled_val.span.end - enabled_val.span.start,
+                        ),
+                        message: "menubar.enabled must be true or false".into(),
+                    });
+                }
+            }
+            if let Some(max_len_val) = table.get("max_len") {
+                if let Some(v) = max_len_val.as_integer() {
+                    if v > 0 {
+                        menubar.max_len = v as usize;
+                    } else {
+                        errors.push(ConfigError::InvalidMenubarField {
+                            src: src.clone(),
+                            field: "max_len".into(),
+                            span: SourceSpan::new(
+                                max_len_val.span.start.into(),
+                                max_len_val.span.end - max_len_val.span.start,
+                            ),
+                            message: "menubar.max_len must be a positive integer".into(),
+                        });
+                    }
+                } else {
+                    errors.push(ConfigError::InvalidMenubarField {
+                        src: src.clone(),
+                        field: "max_len".into(),
+                        span: SourceSpan::new(
+                            max_len_val.span.start.into(),
+                            max_len_val.span.end - max_len_val.span.start,
+                        ),
+                        message: "menubar.max_len must be an integer".into(),
+                    });
+                }
+            }
+        } else {
+            errors.push(ConfigError::InvalidMenubarField {
+                src: src.clone(),
+                field: "menubar".into(),
+                span: m_span,
+                message: "menubar must be a boolean or table".into(),
+            });
         }
     }
 
@@ -296,6 +368,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
         global_binds,
         layers,
         layout,
+        menubar,
     };
 
     Ok(config)

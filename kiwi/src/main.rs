@@ -6,6 +6,7 @@ pub mod ffi;
 pub mod hotkey;
 pub mod input;
 pub mod manager;
+mod menubar;
 mod shell_runtime;
 mod translate;
 pub mod window;
@@ -21,6 +22,8 @@ use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes};
 use core_graphics::event::{
     CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CallbackResult, EventField,
 };
+use objc2_app_kit::NSApplication;
+use objc2_foundation::MainThreadMarker;
 use kiwi_parser::Config;
 use miette::{Report, miette};
 use std::path::{Path, PathBuf};
@@ -50,6 +53,9 @@ pub(crate) fn run_daemon(
 ) -> CliResult<()> {
     init_tracing(log_args);
 
+    let mtm = MainThreadMarker::new().expect("Must run on main thread");
+    let app = NSApplication::sharedApplication(mtm);
+
     if !a11y::is_process_trusted() {
         return Err(CliError::new(
             "Please grant accessibility permissions before running kiwi daemon",
@@ -71,6 +77,7 @@ pub(crate) fn run_daemon(
     })?;
 
     manager::init_action_executor();
+    menubar::init(config.menubar);
 
     if let Some(layout_id) = &config.layout {
         println!("Setting layout to: {layout_id}");
@@ -193,7 +200,7 @@ pub(crate) fn run_daemon(
 
     info!("Kiwi is running...");
     tap.enable();
-    CFRunLoop::run_current();
+    app.run();
 
     Ok(())
 }

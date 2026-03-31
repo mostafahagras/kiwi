@@ -116,6 +116,7 @@ If neither exists, startup fails.
 
 Top-level sections:
 - `layout = "..."` (optional keyboard layout id/alias)
+- `[menubar]` (optional menubar status item settings)
 - `[mods]` (optional modifier aliases)
 - `[binds]` global bindings
 - `[apps]` optional app aliases and groups
@@ -126,6 +127,10 @@ Example:
 
 ```toml
 layout = "ABC"
+
+[menubar]
+enabled = true
+max_len = 32
 
 [mods]
 hyper = ["command", "option", "shift", "control"]
@@ -196,6 +201,7 @@ Action value can be:
 - `sleep:<milliseconds>`
 - `pass:<binding>`
 - `swallow:<binding>`
+- `menubar:<enable|disable|toggle>`
 - `layer:<target>` (layer-local only)
 
 Special non-prefixed actions:
@@ -225,6 +231,12 @@ Layer target lookup rules:
 - In global layer scope: only global layers are considered.
 - In app layer scope: app-local layer namespace is checked first, then global fallback.
 - If both app-local and global layers share the same short name, app-local wins by default.
+
+### Menubar Actions
+
+- `menubar:enable`: show the menubar item.
+- `menubar:disable`: hide the menubar item.
+- `menubar:toggle`: toggle the menubar item.
 
 ### Snap Modes
 

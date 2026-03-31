@@ -177,6 +177,18 @@ pub enum ConfigError {
         help: String, // e.g., "Did you mean 'activate'?"
     },
 
+    #[error("Invalid menubar field '{field}'")]
+    #[diagnostic(code(config::invalid_menubar_field))]
+    InvalidMenubarField {
+        #[source_code]
+        src: NamedSource<String>,
+        field: String,
+        #[label("invalid value")]
+        span: SourceSpan,
+        #[help]
+        message: String,
+    },
+
     #[error("Timeout should be a number")]
     #[diagnostic(code(config::timeout_type_coercion), severity(warning))]
     TimeoutCoercion {

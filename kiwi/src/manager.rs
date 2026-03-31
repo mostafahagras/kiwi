@@ -122,6 +122,33 @@ pub fn set_shared_manager(manager: Arc<Mutex<HotkeyManager>>) {
     let _ = SHARED_MANAGER.set(manager);
 }
 
+pub fn active_layer_names_snapshot() -> Vec<String> {
+    if let Some(shared) = SHARED_MANAGER.get()
+        && let Ok(mgr) = shared.lock()
+    {
+        return mgr.active_layer_names();
+    }
+    Vec::new()
+}
+
+pub fn expire_active_layers() -> bool {
+    if let Some(shared) = SHARED_MANAGER.get()
+        && let Ok(mut mgr) = shared.lock()
+    {
+        return mgr.expire_layers();
+    }
+    false
+}
+
+pub fn next_layer_deadline() -> Option<std::time::Instant> {
+    if let Some(shared) = SHARED_MANAGER.get()
+        && let Ok(mgr) = shared.lock()
+    {
+        return mgr.next_layer_deadline();
+    }
+    None
+}
+
 pub fn dispatch_action(action: Action) {
     if let Some(tx) = ACTION_SENDER.get() {
         ACTION_QUEUE_DEPTH.fetch_add(1, Ordering::SeqCst);
@@ -280,6 +307,15 @@ pub fn handle_action(action: &Action) {
                     Err(e) => error!("Failed to resolve layer target '{target}': {e}"),
                 }
             }
+        }
+        Action::MenubarEnable => {
+            crate::menubar::request_enable();
+        }
+        Action::MenubarDisable => {
+            crate::menubar::request_disable();
+        }
+        Action::MenubarToggle => {
+            crate::menubar::request_toggle();
         }
         _ => {
             error!("Action not yet fully implemented: {:?}", action);

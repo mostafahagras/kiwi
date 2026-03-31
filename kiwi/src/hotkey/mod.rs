@@ -273,6 +273,7 @@ impl HotkeyManager {
         {
             self.active_layers.truncate(idx);
             self.pending_deactivate_release = None;
+            self.notify_layers_changed();
         }
 
         self.last_app = Some(current_app.to_string());
@@ -285,8 +286,9 @@ impl HotkeyManager {
         }
     }
 
-    fn pop_expired_layers(&mut self) {
+    fn pop_expired_layers(&mut self) -> bool {
         let now = Instant::now();
+        let mut changed = false;
         while let Some(top) = self.active_layers.last() {
             let Some(deadline) = top.deadline else {
                 break;
@@ -295,7 +297,9 @@ impl HotkeyManager {
                 break;
             }
             self.active_layers.pop();
+            changed = true;
         }
+        changed
     }
 
     fn reset_top_deadline(&mut self) {
@@ -332,12 +336,15 @@ impl HotkeyManager {
             }
         }
 
-        self.pop_expired_layers();
+        if self.pop_expired_layers() {
+            self.notify_layers_changed();
+        }
 
         if let Some(top) = self.active_layers.last()
             && top.behavior.deactivate.as_ref() == Some(&step)
         {
             self.active_layers.pop();
+            self.notify_layers_changed();
             if is_down {
                 self.pending_deactivate_release = Some(step);
             }
@@ -359,6 +366,7 @@ impl HotkeyManager {
             if is_down && depth > 0 {
                 // Same-event fallback: pop one frame and retry from parent/root.
                 self.active_layers.pop();
+                self.notify_layers_changed();
                 continue;
             }
 
@@ -391,6 +399,7 @@ impl HotkeyManager {
                 behavior: layer_behavior,
             };
             self.active_layers.push(child);
+            self.notify_layers_changed();
             return ProcessResult::consume(None);
         }
 
@@ -402,6 +411,7 @@ impl HotkeyManager {
                 match mode {
                     LayerMode::Oneshot => {
                         self.active_layers.truncate(depth - 1);
+                        self.notify_layers_changed();
                     }
                     LayerMode::Sticky => {
                         self.reset_top_deadline();
@@ -457,15 +467,39 @@ impl HotkeyManager {
             deadline: Self::deadline_from_timeout(registration.behavior.timeout_ms),
             behavior: registration.behavior,
         });
+        self.notify_layers_changed();
         Ok(())
     }
 
+    pub fn expire_layers(&mut self) -> bool {
+        let changed = self.pop_expired_layers();
+        if changed {
+            self.notify_layers_changed();
+        }
+        changed
+    }
+
+    pub fn next_layer_deadline(&self) -> Option<Instant> {
+        self.active_layers.last().and_then(|layer| layer.deadline)
+    }
+
     pub fn clear_active_layers(&mut self) {
-        self.active_layers.clear();
+        if !self.active_layers.is_empty() {
+            self.active_layers.clear();
+            self.notify_layers_changed();
+        }
     }
 
     pub fn pop_active_layer(&mut self) -> bool {
-        self.active_layers.pop().is_some()
+        let popped = self.active_layers.pop().is_some();
+        if popped {
+            self.notify_layers_changed();
+        }
+        popped
+    }
+
+    fn notify_layers_changed(&self) {
+        crate::menubar::request_refresh();
     }
 
     pub fn resolve_layer_target_name(

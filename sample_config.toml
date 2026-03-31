@@ -4,6 +4,11 @@ hyper = ["command", "option", "shift", "control"]
 [binds]
 "hyper+esc" = "sleep 0.25; pmset displaysleepnow"
 "hyper+§" = "sleep 0.25; pmset sleepnow"
+"hyper+m" = "menubar:toggle"
+
+[menubar]
+enabled = false
+max_len = 12
 
 [layer.open]
 activate = "hyper+o"

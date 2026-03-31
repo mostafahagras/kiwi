@@ -73,6 +73,12 @@ pub enum Action {
         target: String,
         scope: LayerTargetScope,
     },
+    /// Enable the menubar item
+    MenubarEnable,
+    /// Disable the menubar item
+    MenubarDisable,
+    /// Toggle the menubar item
+    MenubarToggle,
 }
 
 pub fn parse_action(
@@ -225,12 +231,26 @@ fn parse_single_action_string(
                 .ok(),
             "swallow" => parse_keybinding(payload, span, errors, ctx).map(Action::Swallow),
             "pass" => parse_keybinding(payload, span, errors, ctx).map(Action::Pass),
+            "menubar" => match payload {
+                "enable" | "on" => Some(Action::MenubarEnable),
+                "disable" | "off" => Some(Action::MenubarDisable),
+                "toggle" => Some(Action::MenubarToggle),
+                _ => {
+                    errors.push(ConfigError::InvalidBinding {
+                        src: ctx.src.clone(),
+                        raw: raw_value.to_string(),
+                        span,
+                        message: "menubar action must be one of: enable, disable, toggle".into(),
+                    });
+                    None
+                }
+            },
             _ => {
                 errors.push(ConfigError::UnknownField {
                     src: ctx.src.clone(),
                     found: prefix.to_string(),
                     span,
-                    help: "Valid prefixes: shell, remap, type, snap, resize, sleep, swallow, pass, layer".into(),
+                    help: "Valid prefixes: shell, remap, type, snap, resize, sleep, swallow, pass, menubar, layer".into(),
                 });
                 None
             }
