@@ -407,15 +407,17 @@ impl HotkeyManager {
             debug!("Executing hotkey sequence: {:?}", hit.full_path);
 
             if depth > 0 {
-                let mode = self.active_layers[depth - 1].behavior.mode;
-                match mode {
+                match self.active_layers[depth - 1].behavior.mode {
                     LayerMode::Oneshot => {
-                        self.active_layers.truncate(depth - 1);
+                        while let Some(top) = self.active_layers.last() {
+                            if top.behavior.mode != LayerMode::Oneshot {
+                                break;
+                            }
+                            self.active_layers.pop();
+                        }
                         self.notify_layers_changed();
                     }
-                    LayerMode::Sticky => {
-                        self.reset_top_deadline();
-                    }
+                    LayerMode::Sticky => self.reset_top_deadline(),
                 }
             }
 
@@ -642,7 +644,7 @@ impl Default for HotkeyManager {
 #[cfg(test)]
 mod tests {
     use super::{HotkeyManager, HotkeyStep, LayerBehavior};
-    use kiwi_parser::{Action, Key, LayerMode, Modifiers};
+    use kiwi_parser::{Action, AppSelector, Key, LayerMode, Modifiers};
     use std::thread;
     use std::time::Duration;
 
@@ -746,6 +748,88 @@ mod tests {
 
         let parent_hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
         assert!(!parent_hit.handled);
+    }
+
+    #[test]
+    fn nested_oneshot_exits_all_oneshot_layers() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('a')],
+            None,
+            None,
+            LayerBehavior {
+                name: Some("parent".to_string()),
+                mode: LayerMode::Oneshot,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.register_layer(
+            vec![step('a'), step('c')],
+            None,
+            None,
+            LayerBehavior {
+                name: Some("child".to_string()),
+                mode: LayerMode::Oneshot,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.bind(vec![step('a'), step('c'), step('x')], None, Action::Reload);
+
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
+        assert!(
+            mgr.process(Key::Char('c'), Modifiers::NONE, true, "")
+                .handled
+        );
+
+        let hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(hit.action.is_some());
+        assert!(mgr.active_layer_names().is_empty());
+    }
+
+    #[test]
+    fn sticky_parent_oneshot_child_preserves_sticky_parent() {
+        let mut mgr = HotkeyManager::new();
+        mgr.register_layer(
+            vec![step('a')],
+            None,
+            None,
+            LayerBehavior {
+                name: Some("parent".to_string()),
+                mode: LayerMode::Sticky,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.register_layer(
+            vec![step('a'), step('c')],
+            None,
+            None,
+            LayerBehavior {
+                name: Some("child".to_string()),
+                mode: LayerMode::Oneshot,
+                timeout_ms: None,
+                deactivate: None,
+            },
+        );
+        mgr.bind(vec![step('a'), step('c'), step('x')], None, Action::Reload);
+
+        assert!(
+            mgr.process(Key::Char('a'), Modifiers::NONE, true, "")
+                .handled
+        );
+        assert!(
+            mgr.process(Key::Char('c'), Modifiers::NONE, true, "")
+                .handled
+        );
+
+        let hit = mgr.process(Key::Char('x'), Modifiers::NONE, true, "");
+        assert!(hit.action.is_some());
+        assert_eq!(mgr.active_layer_names(), vec!["parent".to_string()]);
     }
 
     #[test]

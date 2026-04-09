@@ -299,6 +299,7 @@ Layers define scoped keymaps activated by a trigger.
 
 - layers are tracked as a stack
 - miss in child layer pops to parent (not root)
+- handled bind in a oneshot layer pops consecutive oneshot layers until a sticky parent or root
 - when stack becomes empty, normal global/app handling resumes
 
 ### Layer Example
