@@ -90,6 +90,7 @@ pub fn intercept_decision(key: &Key, modifiers: Modifiers, is_down: bool) -> Int
 
     if !is_down && mode.awaiting_exit_key_up && mode.exit.key == *key {
         *guard = None;
+        crate::menubar::request_refresh();
         return InterceptDecision::DropWithoutProcessing;
     }
 
@@ -270,10 +271,12 @@ pub fn handle_action(action: &Action) {
         Action::Pass(exit_binding) => {
             info!("Entering pass mode until {:?}", exit_binding);
             activate_intercept_mode(InterceptKind::Pass, exit_binding.clone());
+            crate::menubar::request_refresh();
         }
         Action::Swallow(exit_binding) => {
             info!("Entering swallow mode until {:?}", exit_binding);
             activate_intercept_mode(InterceptKind::Swallow, exit_binding.clone());
+            crate::menubar::request_refresh();
         }
         Action::LayerPop => {
             if let Some(shared) = SHARED_MANAGER.get()

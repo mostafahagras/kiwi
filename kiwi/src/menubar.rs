@@ -1,4 +1,4 @@
-use crate::manager::active_layer_names_snapshot;
+use crate::manager::{InterceptState, active_layer_names_snapshot, intercept_state};
 use kiwi_parser::MenubarConfig;
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::NSObject;
@@ -237,7 +237,7 @@ fn update_title(state: &mut MenubarState, mtm: MainThreadMarker) {
     };
 
     let layers = active_layer_names_snapshot();
-    let title = format_layer_title(&layers, state.max_len);
+    let title = format_layer_title(&layers, state.max_len, intercept_state());
     let title = NSString::from_str(&title);
     button.setTitle(&title);
 }
@@ -279,11 +279,17 @@ fn schedule_timeout(state: &mut MenubarState) {
     });
 }
 
-fn format_layer_title(layers: &[String], max_len: usize) -> String {
-    let Some(top) = layers.last() else {
-        return "root".to_string();
-    };
-    truncate_layer(top, max_len)
+fn format_layer_title(layers: &[String], max_len: usize, intercept: InterceptState) -> String {
+    match intercept {
+        InterceptState::Pass => truncate_layer("pass", max_len),
+        InterceptState::Swallow => truncate_layer("swallow", max_len),
+        InterceptState::None => {
+            let Some(top) = layers.last() else {
+                return "root".to_string();
+            };
+            truncate_layer(top, max_len)
+        }
+    }
 }
 
 fn truncate_layer(path: &str, max_len: usize) -> String {
