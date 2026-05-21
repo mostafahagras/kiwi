@@ -418,6 +418,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_binding_accepts_function_modifier() {
+        let binding = parse_binding("fn+k").expect("binding should parse");
+        assert_eq!(
+            binding,
+            KeyBinding {
+                modifiers: Modifiers::FUNCTION,
+                key: Key::Char('k'),
+            }
+        );
+    }
+
+    #[test]
     fn parse_binding_rejects_multiple_keys() {
         let err = parse_binding("k+l").expect_err("binding should fail");
         assert!(err.contains("multiple keys"));

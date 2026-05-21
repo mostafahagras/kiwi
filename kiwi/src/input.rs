@@ -55,6 +55,9 @@ pub fn modifiers_from_cg_flags(flags: CGEventFlags) -> Modifiers {
     if flags.contains(CGEventFlags::CGEventFlagCommand) {
         result |= Modifiers::COMMAND;
     }
+    if flags.contains(CGEventFlags::CGEventFlagSecondaryFn) {
+        result |= Modifiers::FUNCTION;
+    }
     result
 }
 
@@ -84,6 +87,9 @@ fn modifiers_to_cg_flags(modifiers: Modifiers) -> CGEventFlags {
     if modifiers.contains(Modifiers::COMMAND) {
         flags |= CGEventFlags::CGEventFlagCommand;
     }
+    if modifiers.contains(Modifiers::FUNCTION) {
+        flags |= CGEventFlags::CGEventFlagSecondaryFn;
+    }
     flags
 }
 
@@ -100,6 +106,9 @@ fn modifiers_to_ns_flags(modifiers: Modifiers) -> u64 {
     }
     if modifiers.contains(Modifiers::COMMAND) {
         flags |= 1 << 20;
+    }
+    if modifiers.contains(Modifiers::FUNCTION) {
+        flags |= 1 << 23;
     }
     flags
 }
@@ -261,6 +270,27 @@ pub fn click(point: CGPoint) {
     ) {
         event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, USER_DATA);
         event.post(CGEventTapLocation::HID);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{modifiers_from_cg_flags, modifiers_to_cg_flags, modifiers_to_ns_flags};
+    use core_graphics::event::CGEventFlags;
+    use kiwi_parser::Modifiers;
+
+    #[test]
+    fn function_modifier_round_trips_with_cg_flags() {
+        let flags = modifiers_to_cg_flags(Modifiers::FUNCTION);
+        assert!(flags.contains(CGEventFlags::CGEventFlagSecondaryFn));
+
+        let parsed = modifiers_from_cg_flags(CGEventFlags::CGEventFlagSecondaryFn);
+        assert!(parsed.contains(Modifiers::FUNCTION));
+    }
+
+    #[test]
+    fn function_modifier_sets_ns_flag() {
+        assert_ne!(modifiers_to_ns_flags(Modifiers::FUNCTION) & (1 << 23), 0);
     }
 }
 

@@ -18,6 +18,9 @@ pub const MODIFIER_SUGGESTIONS: &[&str] = &[
     "super",
     "windows",
     "win",
+    // Function
+    "function",
+    "fn",
 ];
 
 pub const KEY_SUGGESTIONS: &[&str] = &[

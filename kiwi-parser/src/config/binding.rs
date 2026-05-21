@@ -235,4 +235,24 @@ mod tests {
         assert!(parsed.modifiers.contains(Modifiers::SHIFT));
         assert!(errors.is_empty());
     }
+
+    #[test]
+    fn binding_parses_function_modifier() {
+        let src = NamedSource::new("test.toml", "".to_string());
+        let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+        let context = ctx(&src, &modifier_map);
+        let mut errors = Vec::new();
+
+        let parsed = parse_keybinding(
+            "fn+j",
+            SourceSpan::new(0.into(), 4),
+            &mut errors,
+            &context,
+        )
+        .expect("binding should parse");
+
+        assert_eq!(parsed.key, Key::Char('j'));
+        assert!(parsed.modifiers.contains(Modifiers::FUNCTION));
+        assert!(errors.is_empty());
+    }
 }

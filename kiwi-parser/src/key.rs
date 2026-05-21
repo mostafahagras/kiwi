@@ -144,11 +144,12 @@ impl std::fmt::Display for Key {
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
     pub struct Modifiers: u8 {
-        const NONE    = 0b0000;
-        const CONTROL = 0b0001;
-        const SHIFT   = 0b0010;
-        const OPTION  = 0b0100;
-        const COMMAND = 0b1000;
+        const NONE     = 0b00000;
+        const CONTROL  = 0b00001;
+        const SHIFT    = 0b00010;
+        const OPTION   = 0b00100;
+        const COMMAND  = 0b01000;
+        const FUNCTION = 0b10000;
     }
 }
 
@@ -159,6 +160,7 @@ impl Modifiers {
             "shift" | "sft" => Self::SHIFT,
             "option" | "opt" | "alt" | "alternative" => Self::OPTION,
             "command" | "cmd" | "meta" | "super" | "windows" | "win" => Self::COMMAND,
+            "function" | "fn" => Self::FUNCTION,
             _ => Self::NONE,
         }
     }
@@ -185,6 +187,9 @@ impl std::fmt::Display for Modifiers {
         }
         if self.contains(Self::SHIFT) {
             parts.push("shift");
+        }
+        if self.contains(Self::FUNCTION) {
+            parts.push("fn");
         }
 
         if parts.is_empty() {
@@ -226,7 +231,7 @@ impl std::fmt::Debug for KeyBinding {
 
 #[cfg(test)]
 mod tests {
-    use super::Key;
+    use super::{Key, Modifiers};
 
     #[test]
     fn parses_keyboard_brightness_aliases() {
@@ -246,5 +251,20 @@ mod tests {
             Key::parse("kbdown"),
             Some(Key::KeyboardBrightnessDown)
         ));
+    }
+
+    #[test]
+    fn parses_function_modifier_aliases() {
+        assert_eq!(Modifiers::parse("fn"), Modifiers::FUNCTION);
+        assert_eq!(Modifiers::parse("function"), Modifiers::FUNCTION);
+    }
+
+    #[test]
+    fn displays_function_modifier() {
+        assert_eq!(Modifiers::FUNCTION.to_string(), "fn");
+        assert_eq!(
+            (Modifiers::COMMAND | Modifiers::FUNCTION).to_string(),
+            "cmd+fn"
+        );
     }
 }

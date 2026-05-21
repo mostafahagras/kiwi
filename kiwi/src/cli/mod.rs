@@ -210,6 +210,7 @@ pub fn run(command: Commands) -> CliResult<()> {
 mod tests {
     use super::{Cli, Commands, CtlCommand, DaemonCommand, LayerCommand};
     use clap::Parser;
+    use std::path::PathBuf;
 
     #[test]
     fn parse_ctl_send_single_binding() {

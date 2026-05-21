@@ -179,7 +179,7 @@ Examples:
 - `"hyper+left"`
 - `"esc"`
 
-Supported modifier names include aliases like `cmd`, `opt`/`alt`, `ctrl`, `shift`.
+Supported modifier names include aliases like `cmd`, `opt`/`alt`, `ctrl`, `shift`, `fn`.
 
 ## Actions
 
