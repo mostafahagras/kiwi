@@ -37,6 +37,7 @@ unsafe extern "C" {
     );
     fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
     fn CFRelease(obj: *mut c_void);
+    fn CGEventSetFlags(event: *mut c_void, flags: u64);
 }
 
 const CG_EVENT_SOURCE_USER_DATA_FIELD: u32 = 42;
@@ -239,6 +240,7 @@ pub fn type_unicode_string(text: &str) {
 
             CGEventSetIntegerValueField(event, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
             CGEventKeyboardSetUnicodeString(event, utf16.len() as u64, utf16.as_ptr());
+            CGEventSetFlags(event, 0);
             CGEventPost(0, event);
             CFRelease(event);
         }

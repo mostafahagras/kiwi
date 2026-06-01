@@ -26,20 +26,26 @@ type CGEventTapCallBackInternal = unsafe extern "C" fn(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CGEventType {
     Null = 0,
+    LeftMouseDown = 1,
+    RightMouseDown = 3,
     KeyDown = 10,
     KeyUp = 11,
     FlagsChanged = 12,
     SystemDefined = 14,
+    OtherMouseDown = 25,
 }
 
 impl CGEventType {
     pub const fn from_raw(raw: u32) -> Option<Self> {
         match raw {
             0 => Some(Self::Null),
+            1 => Some(Self::LeftMouseDown),
+            3 => Some(Self::RightMouseDown),
             10 => Some(Self::KeyDown),
             11 => Some(Self::KeyUp),
             12 => Some(Self::FlagsChanged),
             14 => Some(Self::SystemDefined),
+            25 => Some(Self::OtherMouseDown),
             _ => None,
         }
     }
