@@ -377,7 +377,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 #[cfg(test)]
 mod tests {
     use super::parse_config;
-    use crate::config::action::{Action, LayerTargetScope};
+    use crate::config::action::{Action, LayerTargetScope, MenubarAction};
     use crate::config::layer::LayerMode;
     use std::path::PathBuf;
 
@@ -631,6 +631,105 @@ tabs = ["Ghostty"]
                 assert_eq!(text, "Hello from Unicode injection 🚀");
             }
             _ => panic!("expected type action"),
+        }
+    }
+
+    #[test]
+    fn menubar_table_action_parses() {
+        let raw = r#"
+[binds]
+"cmd+c" = { action = "menubar:click", item = ["Edit", "Copy"] }
+"fn+cmd+c" = { action = "menubar:show", app = "Safari", item = ["Edit", "Copy"] }
+"cmd+u" = { action = "menubar:click", app = "chrome", item = ["File", "New Tab"] }
+"cmd+shift+u" = { action = "menubar:show", item = ["Copy"] }
+"#;
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+
+        assert_eq!(config.global_binds.len(), 4);
+
+        let click = config
+            .global_binds
+            .values()
+            .find(|action| {
+                matches!(
+                    action,
+                    Action::MenubarClick(MenubarAction { app: None, .. })
+                )
+            })
+            .expect("expected default-app click action");
+        match click {
+            Action::MenubarClick(MenubarAction { app, item }) => {
+                assert_eq!(app, &None);
+                assert_eq!(item, &vec!["Edit".to_string(), "Copy".to_string()]);
+            }
+            _ => panic!("expected menubar click action"),
+        }
+
+        let show = config
+            .global_binds
+            .values()
+            .find(|action| {
+                matches!(
+                    action,
+                    Action::MenubarShow(MenubarAction { app: Some(app), .. }) if app == "Safari"
+                )
+            })
+            .expect("expected Safari show action");
+        match show {
+            Action::MenubarShow(MenubarAction { app, item }) => {
+                assert_eq!(app, &Some("Safari".to_string()));
+                assert_eq!(item, &vec!["Edit".to_string(), "Copy".to_string()]);
+            }
+            _ => panic!("expected menubar show action"),
+        }
+    }
+
+    #[test]
+    fn malformed_menubar_table_is_rejected() {
+        let raw = r#"
+[binds]
+"cmd+c" = { action = "menubar:click", item = 42 }
+"#;
+
+        assert!(parse_config(raw, PathBuf::from("test.toml")).is_err());
+    }
+
+    #[test]
+    fn structured_menubar_action_parses_inside_layer() {
+        let raw = r#"
+[layer.infuse]
+activate = "cmd+u"
+spc = { action = "menubar:click", app = "Infuse", item = "Play/Pause" }
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let layer = config.layers.values().next().expect("expected layer");
+        let action = layer.binds.values().next().expect("expected action");
+        match action {
+            Action::MenubarClick(MenubarAction { app, item }) => {
+                assert_eq!(app, &Some("Infuse".to_string()));
+                assert_eq!(item, &vec!["Play/Pause".to_string()]);
+            }
+            _ => panic!("expected menubar click action"),
+        }
+    }
+
+    #[test]
+    fn structured_menubar_action_parses_inside_app() {
+        let raw = r#"
+[app."Infuse"]
+"spc" = { action = "menubar:click", app = "Infuse", item = ["Play/Pause"] }
+"#;
+
+        let config = parse_config(raw, PathBuf::from("test.toml")).expect("config should parse");
+        let entry = &config.apps[0];
+        let action = entry.app.binds.values().next().expect("expected action");
+        match action {
+            Action::MenubarClick(MenubarAction { app, item }) => {
+                assert_eq!(app, &Some("Infuse".to_string()));
+                assert_eq!(item, &vec!["Play/Pause".to_string()]);
+            }
+            _ => panic!("expected menubar click action"),
         }
     }
 }

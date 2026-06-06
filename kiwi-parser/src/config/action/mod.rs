@@ -27,6 +27,12 @@ pub struct ParseScope<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenubarAction {
+    pub app: Option<String>,
+    pub item: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// Executes any shell command.
     /// Use with caution
@@ -79,6 +85,10 @@ pub enum Action {
     MenubarDisable,
     /// Toggle the menubar item
     MenubarToggle,
+    /// Click a specific menubar item path
+    MenubarClick(MenubarAction),
+    /// Show/open a specific menubar item path
+    MenubarShow(MenubarAction),
 }
 
 pub fn parse_action(
@@ -110,16 +120,203 @@ pub fn parse_action(
             }
         }
 
+        // Case C: A structured action table (e.g. { action = "menubar:click", item = [...] })
+        ValueInner::Table(table) => {
+            parse_structured_action_table(table, span, errors, ctx, scope)
+        }
+
         _ => {
             errors.push(ConfigError::InvalidBinding {
                 src: ctx.src.clone(),
                 raw: "Unsupported TOML type for action".into(),
                 span,
-                message: "Action must be a string or an array of strings".into(),
+                message: "Action must be a string, an array of strings, or a structured action table".into(),
             });
             None
         }
     }
+}
+
+fn parse_structured_action_table(
+    table: &toml_span::value::Table,
+    span: SourceSpan,
+    errors: &mut Vec<ConfigError>,
+    ctx: &ValidationContext,
+    scope: ParseScope<'_>,
+) -> Option<Action> {
+    let Some(action_val) = table.get("action") else {
+        errors.push(ConfigError::MissingMenubarActionField {
+            src: ctx.src.clone(),
+            field: "action".into(),
+            span,
+            message: "menubar action tables require an `action` field".into(),
+        });
+        return None;
+    };
+
+    let action_span = SourceSpan::new(
+        action_val.span.start.into(),
+        action_val.span.end - action_val.span.start,
+    );
+    let Some(action_name) = action_val.as_str() else {
+        errors.push(ConfigError::InvalidMenubarActionField {
+            src: ctx.src.clone(),
+            field: "action".into(),
+            span: action_span,
+            message: "action must be a string".into(),
+        });
+        return None;
+    };
+
+    match action_name.trim() {
+        "menubar:click" => parse_menubar_action_table(table, span, errors, ctx, scope)
+            .map(Action::MenubarClick),
+        "menubar:show" => parse_menubar_action_table(table, span, errors, ctx, scope)
+            .map(Action::MenubarShow),
+        _ => {
+            errors.push(ConfigError::InvalidBinding {
+                src: ctx.src.clone(),
+                raw: action_name.to_string(),
+                span: action_span,
+                message: "menubar action tables must use `menubar:click` or `menubar:show`"
+                    .into(),
+            });
+            None
+        }
+    }
+}
+
+fn parse_menubar_action_table(
+    table: &toml_span::value::Table,
+    span: SourceSpan,
+    errors: &mut Vec<ConfigError>,
+    ctx: &ValidationContext,
+    _scope: ParseScope<'_>,
+) -> Option<MenubarAction> {
+    let mut app = None;
+    let mut item = None;
+
+    for (key, val) in table {
+        let key_str = key.to_string();
+        if key_str == "action" {
+            continue;
+        }
+
+        let key_span = SourceSpan::new(key.span.start.into(), key.span.end - key.span.start);
+        match key_str.as_str() {
+            "app" => {
+                let Some(raw_app) = val.as_str() else {
+                    errors.push(ConfigError::InvalidMenubarActionField {
+                        src: ctx.src.clone(),
+                        field: key_str,
+                        span: key_span,
+                        message: "app must be a string".into(),
+                    });
+                    continue;
+                };
+                let raw_app = raw_app.trim();
+                if raw_app.is_empty() {
+                    errors.push(ConfigError::InvalidMenubarActionField {
+                        src: ctx.src.clone(),
+                        field: "app".into(),
+                        span: key_span,
+                        message: "app cannot be empty".into(),
+                    });
+                    continue;
+                }
+                app = Some(
+                    ctx.app_aliases
+                        .get(raw_app)
+                        .cloned()
+                        .unwrap_or_else(|| raw_app.to_string()),
+                );
+            }
+            "item" => {
+                let mut path = Vec::new();
+                if let Some(component) = val.as_str() {
+                    let component = component.trim();
+                    if component.is_empty() {
+                        errors.push(ConfigError::InvalidMenubarActionField {
+                            src: ctx.src.clone(),
+                            field: "item".into(),
+                            span: key_span,
+                            message: "item cannot be empty".into(),
+                        });
+                        continue;
+                    }
+                    path.push(component.to_string());
+                } else if let Some(items) = val.as_array() {
+                    path.reserve(items.len());
+                    for item_val in items {
+                        let item_span = SourceSpan::new(
+                            item_val.span.start.into(),
+                            item_val.span.end - item_val.span.start,
+                        );
+                        let Some(component) = item_val.as_str() else {
+                            errors.push(ConfigError::InvalidMenubarActionField {
+                                src: ctx.src.clone(),
+                                field: "item".into(),
+                                span: item_span,
+                                message: "item entries must be strings".into(),
+                            });
+                            continue;
+                        };
+                        let component = component.trim();
+                        if component.is_empty() {
+                            errors.push(ConfigError::InvalidMenubarActionField {
+                                src: ctx.src.clone(),
+                                field: "item".into(),
+                                span: item_span,
+                                message: "item entries cannot be empty".into(),
+                            });
+                            continue;
+                        }
+                        path.push(component.to_string());
+                    }
+                } else {
+                    errors.push(ConfigError::InvalidMenubarActionField {
+                        src: ctx.src.clone(),
+                        field: key_str,
+                        span: key_span,
+                        message: "item must be a string or an array of strings".into(),
+                    });
+                    continue;
+                }
+
+                if path.is_empty() {
+                    errors.push(ConfigError::MissingMenubarActionField {
+                        src: ctx.src.clone(),
+                        field: "item".into(),
+                        span: key_span,
+                        message: "menubar actions require at least one menu component".into(),
+                    });
+                    continue;
+                }
+
+                item = Some(path);
+            }
+            other => {
+                errors.push(ConfigError::InvalidMenubarActionField {
+                    src: ctx.src.clone(),
+                    field: other.to_string(),
+                    span: key_span,
+                    message: "valid fields are: action, app, item".into(),
+                });
+            }
+        }
+    }
+
+    let Some(item) = item else {
+        errors.push(ConfigError::MissingMenubarActionField {
+            src: ctx.src.clone(),
+            field: "item".into(),
+            span,
+            message: "menubar actions require an `item` array".into(),
+        });
+        return None;
+    };
+
+    Some(MenubarAction { app, item })
 }
 
 fn parse_single_action_string(

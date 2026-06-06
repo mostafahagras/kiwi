@@ -51,6 +51,10 @@ pub fn parse_layers(
         let key_span = SourceSpan::new(key.span.start.into(), key.span.end - key.span.start);
 
         if let Some(inner_table) = val.as_table() {
+            if inner_table.contains_key("action") && !inner_table.contains_key("activate") {
+                continue;
+            }
+
             let mut layer_binds = HashMap::new();
             let mut activate_trigger = None;
             let mut timeout_ms = None;
@@ -72,10 +76,6 @@ pub fn parse_layers(
                 let i_key_str = i_key.to_string();
                 let i_key_span =
                     SourceSpan::new(i_key.span.start.into(), i_key.span.end - i_key.span.start);
-
-                if i_val.as_table().is_some() {
-                    continue;
-                }
 
                 match i_key_str.as_str() {
                     "activate" => {
@@ -121,6 +121,29 @@ pub fn parse_layers(
                         }
                     }
                     _ => {
+                        if let Some(nested_table) = i_val.as_table() {
+                            if nested_table.contains_key("action")
+                                && let Some(action) = parse_action(
+                                    i_val,
+                                    errors,
+                                    ctx,
+                                    ParseScope {
+                                        in_layer: true,
+                                        app_name,
+                                    },
+                                )
+                                && let Some(trigger) = parse_keybinding(
+                                    &i_key_str,
+                                    i_key_span,
+                                    errors,
+                                    ctx,
+                                )
+                            {
+                                layer_binds.insert(trigger, action);
+                            }
+                            continue;
+                        }
+
                         // Check for typos of reserved words (e.g., "activte")
                         for target in reserved {
                             if is_similar(&i_key_str, target) {

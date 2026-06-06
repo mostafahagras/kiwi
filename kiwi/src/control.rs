@@ -389,6 +389,8 @@ fn action_kind(action: &Action) -> &'static str {
         Action::MenubarEnable => "menubar_enable",
         Action::MenubarDisable => "menubar_disable",
         Action::MenubarToggle => "menubar_toggle",
+        Action::MenubarClick(_) => "menubar_click",
+        Action::MenubarShow(_) => "menubar_show",
     }
 }
 

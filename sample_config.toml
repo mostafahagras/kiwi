@@ -5,6 +5,9 @@ hyper = ["command", "option", "shift", "control"]
 "hyper+esc" = "sleep 0.25; pmset displaysleepnow"
 "hyper+§" = "sleep 0.25; pmset sleepnow"
 "hyper+m" = "menubar:toggle"
+"cmd+c" = { action = "menubar:click", item = ["Edit", "Copy"] }
+"fn+cmd+c" = { action = "menubar:show", item = ["Copy"] }
+"cmd+t" = { action = "menubar:click", app = "Google Chrome", item = ["File", "New Tab"] }
 
 [menubar]
 enabled = false

@@ -189,6 +189,30 @@ pub enum ConfigError {
         message: String,
     },
 
+    #[error("Invalid menubar action field '{field}'")]
+    #[diagnostic(code(config::invalid_menubar_action_field))]
+    InvalidMenubarActionField {
+        #[source_code]
+        src: NamedSource<String>,
+        field: String,
+        #[label("invalid value")]
+        span: SourceSpan,
+        #[help]
+        message: String,
+    },
+
+    #[error("Missing menubar action field '{field}'")]
+    #[diagnostic(code(config::missing_menubar_action_field))]
+    MissingMenubarActionField {
+        #[source_code]
+        src: NamedSource<String>,
+        field: String,
+        #[label("missing field")]
+        span: SourceSpan,
+        #[help]
+        message: String,
+    },
+
     #[error("Timeout should be a number")]
     #[diagnostic(code(config::timeout_type_coercion), severity(warning))]
     TimeoutCoercion {

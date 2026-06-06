@@ -73,6 +73,7 @@ unsafe extern "C" {
         attribute: CFStringRef,
         value: *mut CFTypeRef,
     ) -> AXError;
+    pub fn AXUIElementPerformAction(element: CFTypeRef, action: CFStringRef) -> AXError;
     pub fn _AXUIElementGetWindow(element: CFTypeRef, wid: *mut CGWindowID) -> AXError;
 
     pub fn AXValueCreate(theType: AXValueType, valuePtr: *const c_void) -> CFTypeRef;

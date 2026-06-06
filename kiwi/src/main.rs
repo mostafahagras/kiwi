@@ -7,6 +7,7 @@ pub mod hotkey;
 pub mod input;
 pub mod manager;
 mod menubar;
+mod menubar_items;
 mod shell_runtime;
 mod translate;
 pub mod window;

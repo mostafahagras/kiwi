@@ -320,6 +320,16 @@ pub fn handle_action(action: &Action) {
         Action::MenubarToggle => {
             crate::menubar::request_toggle();
         }
+        Action::MenubarClick(action) => {
+            if let Err(err) = crate::menubar_items::click(action) {
+                error!("{err}");
+            }
+        }
+        Action::MenubarShow(action) => {
+            if let Err(err) = crate::menubar_items::show(action) {
+                error!("{err}");
+            }
+        }
         _ => {
             error!("Action not yet fully implemented: {:?}", action);
         }

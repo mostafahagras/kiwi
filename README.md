@@ -7,6 +7,7 @@ It intercepts key events globally and can:
 - remap keys
 - move/resize windows
 - execute sequential actions
+- click or reveal macOS menubar items
 - switch into scoped key layers
 - temporarily pass/swallow input until an exit binding
 
@@ -203,6 +204,9 @@ Action value can be:
 - `swallow:<binding>`
 - `menubar:<enable|disable|toggle>`
 - `layer:<target>` (layer-local only)
+- structured menubar actions:
+  - `{ action = "menubar:click", item = ["Edit", "Copy"] }`
+  - `{ action = "menubar:show", app = "Safari", item = ["Copy"] }`
 
 Special non-prefixed actions:
 - `reload`
@@ -237,6 +241,11 @@ Layer target lookup rules:
 - `menubar:enable`: show the menubar item.
 - `menubar:disable`: hide the menubar item.
 - `menubar:toggle`: toggle the menubar item.
+- `menubar:click`: click a specific menu item path from the active app, or from `app = "App Name"` when provided.
+- `menubar:show`: open a menu path and best-effort reveal the final item.
+- `item` can be a single menu title like `"Play/Pause"` or an ordered array of menu titles like `["File", "New Tab"]`.
+- You can shorten the path to a unique leaf name when it is unambiguous in the target app, like `["Copy"]`.
+- Matching is case-insensitive and works against the app’s menu breadcrumb suffixes.
 
 ### Snap Modes
 

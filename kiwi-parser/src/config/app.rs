@@ -86,14 +86,27 @@ pub fn parse_apps(
                 let i_key_span =
                     SourceSpan::new(i_key.span.start.into(), i_key.span.end - i_key.span.start);
 
-                // Skip child tables; handled by recursion
-                if i_val.as_table().is_some() {
-                    continue;
-                }
-
                 // Apps don't strictly have "reserved" fields like timeout/mode
                 // at the top level, but we skip 'activate' as a bind if it exists.
                 if i_key_str == "activate" {
+                    continue;
+                }
+
+                if let Some(nested_table) = i_val.as_table() {
+                    if nested_table.contains_key("action")
+                        && let Some(trigger) = parse_keybinding(&i_key_str, i_key_span, errors, ctx)
+                        && let Some(action) = parse_action(
+                            i_val,
+                            errors,
+                            ctx,
+                            ParseScope {
+                                in_layer: false,
+                                app_name: Some(&resolved_name),
+                            },
+                        )
+                    {
+                        app_binds.insert(trigger, action);
+                    }
                     continue;
                 }
 
