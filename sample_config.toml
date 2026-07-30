@@ -1,3 +1,5 @@
+cwd = "$KIWI"
+
 [mods]
 hyper = ["command", "option", "shift", "control"]
 

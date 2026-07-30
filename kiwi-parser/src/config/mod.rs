@@ -26,6 +26,7 @@ use utils::suggest_best_match;
 
 #[derive(Debug)]
 pub struct Config {
+    pub cwd: String,
     pub layout: Option<String>,
     pub menubar: MenubarConfig,
     pub global_binds: HashMap<KeyBinding, Action>,
@@ -69,6 +70,22 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
         .as_table()
         .ok_or_else(|| miette::miette!("Root is not a table"))?;
     let mut errors = Vec::new();
+
+    // --- Working Directory Validation ---
+    let mut cwd = "$KIWI".to_string();
+    if let Some(cwd_val) = root.get("cwd") {
+        if let Some(value) = cwd_val.as_str() {
+            cwd = value.to_string();
+        } else {
+            errors.push(ConfigError::InvalidCwd {
+                src: src.clone(),
+                span: SourceSpan::new(
+                    cwd_val.span.start.into(),
+                    cwd_val.span.end - cwd_val.span.start,
+                ),
+            });
+        }
+    }
 
     // --- Layout Validation ---
     let mut layout = None;
@@ -365,6 +382,7 @@ pub fn parse_config(raw_toml: &str, path: PathBuf) -> Result<Config, Report> {
 
     let config = Config {
         apps,
+        cwd,
         global_binds,
         layers,
         layout,
@@ -380,6 +398,24 @@ mod tests {
     use crate::config::action::{Action, LayerTargetScope, MenubarAction};
     use crate::config::layer::LayerMode;
     use std::path::PathBuf;
+
+    #[test]
+    fn cwd_defaults_to_kiwi_home() {
+        let config = parse_config("", PathBuf::from("test.toml")).expect("config should parse");
+        assert_eq!(config.cwd, "$KIWI");
+    }
+
+    #[test]
+    fn cwd_parses_as_a_string() {
+        let config = parse_config(r#"cwd = "$HOME/code""#, PathBuf::from("test.toml"))
+            .expect("config should parse");
+        assert_eq!(config.cwd, "$HOME/code");
+    }
+
+    #[test]
+    fn cwd_rejects_non_string_values() {
+        assert!(parse_config("cwd = 42", PathBuf::from("test.toml")).is_err());
+    }
 
     #[test]
     fn layer_mode_defaults_to_oneshot_and_parses_deactivate() {

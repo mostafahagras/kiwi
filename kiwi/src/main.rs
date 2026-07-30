@@ -54,6 +54,30 @@ pub(crate) fn run_daemon(
 ) -> CliResult<()> {
     init_tracing(log_args);
 
+    let config_path = resolve_config_path(config_path_override)
+        .map_err(|e| CliError::new(format!("configuration file not found: {e}")))?;
+    let config_path = config_path.canonicalize().map_err(|e| {
+        CliError::new(format!(
+            "failed to resolve config path {}: {e}",
+            config_path.display()
+        ))
+    })?;
+
+    let config = parse_config_from_path(&config_path).map_err(|e| {
+        CliError::new(format!(
+            "failed to parse config {}: {e:?}",
+            config_path.display()
+        ))
+    })?;
+
+    let cwd = resolve_process_cwd(&config.cwd, &config_path)?;
+    std::env::set_current_dir(&cwd).map_err(|e| {
+        CliError::new(format!(
+            "failed to set working directory to {}: {e}",
+            cwd.display()
+        ))
+    })?;
+
     let mtm = MainThreadMarker::new().expect("Must run on main thread");
     let app = NSApplication::sharedApplication(mtm);
 
@@ -66,16 +90,6 @@ pub(crate) fn run_daemon(
     shell_runtime::init_shell_context();
 
     thread::spawn(init_focus_observer);
-
-    let config_path = resolve_config_path(config_path_override)
-        .map_err(|e| CliError::new(format!("configuration file not found: {e}")))?;
-
-    let config = parse_config_from_path(&config_path).map_err(|e| {
-        CliError::new(format!(
-            "failed to parse config {}: {e:?}",
-            config_path.display()
-        ))
-    })?;
 
     manager::init_action_executor();
     menubar::init(config.menubar);
@@ -255,6 +269,94 @@ pub(crate) fn parse_config_from_path(path: &Path) -> Result<Config, Report> {
     kiwi_parser::parse_config(&toml_str, path.to_path_buf())
 }
 
+fn resolve_process_cwd(raw: &str, config_path: &Path) -> CliResult<PathBuf> {
+    let expanded = expand_config_path_variables(raw, |name| std::env::var(name).ok())?;
+    let path = PathBuf::from(expanded);
+
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(path))
+    }
+}
+
+fn expand_config_path_variables(
+    raw: &str,
+    mut lookup: impl FnMut(&str) -> Option<String>,
+) -> CliResult<String> {
+    expand_path_variables(raw, |name| {
+        if name == "KIWI" {
+            lookup("HOME").map(|home| format!("{home}/.kiwi"))
+        } else {
+            lookup(name)
+        }
+    })
+}
+
+fn expand_path_variables(
+    raw: &str,
+    mut lookup: impl FnMut(&str) -> Option<String>,
+) -> CliResult<String> {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut expanded = String::with_capacity(raw.len());
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] != '$' {
+            expanded.push(chars[index]);
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        index += 1;
+        let name = if chars.get(index) == Some(&'{') {
+            index += 1;
+            let name_start = index;
+            while index < chars.len() && chars[index] != '}' {
+                index += 1;
+            }
+            if index == chars.len() {
+                return Err(CliError::new(format!(
+                    "invalid cwd '{raw}': unclosed variable starting at byte {start}"
+                )));
+            }
+            let name: String = chars[name_start..index].iter().collect();
+            index += 1;
+            name
+        } else {
+            let name_start = index;
+            while index < chars.len()
+                && (chars[index].is_ascii_alphanumeric() || chars[index] == '_')
+            {
+                index += 1;
+            }
+            if name_start == index {
+                expanded.push('$');
+                continue;
+            }
+            chars[name_start..index].iter().collect()
+        };
+
+        if name.is_empty() {
+            return Err(CliError::new(format!(
+                "invalid cwd '{raw}': environment variable name cannot be empty"
+            )));
+        }
+        let value = lookup(&name).ok_or_else(|| {
+            CliError::new(format!(
+                "cannot resolve cwd '{raw}': environment variable ${name} is not set"
+            ))
+        })?;
+        expanded.push_str(&value);
+    }
+
+    Ok(expanded)
+}
+
 fn init_tracing(log_args: LogArgs) {
     let env = if log_args.quiet {
         tracing_subscriber::EnvFilter::new("error")
@@ -268,4 +370,46 @@ fn init_tracing(log_args: LogArgs) {
     };
 
     let _ = tracing_subscriber::fmt().with_env_filter(env).try_init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{expand_config_path_variables, expand_path_variables, resolve_process_cwd};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn expands_plain_and_braced_variables() {
+        let result = expand_path_variables("$HOME/${PROJECT}", |name| match name {
+            "HOME" => Some("/Users/test".into()),
+            "PROJECT" => Some("code".into()),
+            _ => None,
+        })
+        .expect("variables should expand");
+
+        assert_eq!(result, "/Users/test/code");
+    }
+
+    #[test]
+    fn undefined_variables_are_errors() {
+        assert!(expand_path_variables("$MISSING", |_| None).is_err());
+    }
+
+    #[test]
+    fn relative_cwd_is_relative_to_config_directory() {
+        let path = resolve_process_cwd("projects", Path::new("/tmp/.kiwi/config.toml"))
+            .expect("cwd should resolve");
+        assert_eq!(path, PathBuf::from("/tmp/.kiwi/projects"));
+    }
+
+    #[test]
+    fn kiwi_is_a_builtin_alias_for_home_dot_kiwi() {
+        let expanded = expand_config_path_variables("$KIWI", |name| match name {
+            "HOME" => Some("/Users/test".into()),
+            "KIWI" => Some("/should/not/be/used".into()),
+            _ => None,
+        })
+        .expect("$KIWI should resolve");
+
+        assert_eq!(expanded, "/Users/test/.kiwi");
+    }
 }

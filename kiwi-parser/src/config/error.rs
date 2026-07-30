@@ -36,6 +36,14 @@ pub enum ConfigError {
         #[help]
         suggestion: Option<String>,
     },
+    #[error("Invalid cwd")]
+    #[diagnostic(code(config::invalid_cwd))]
+    InvalidCwd {
+        #[source_code]
+        src: NamedSource<String>,
+        #[label("expected a path string")]
+        span: SourceSpan,
+    },
     #[error("Redundant alias definition")]
     #[diagnostic(code(config::redundant_alias))]
     RedundantAlias {

@@ -116,6 +116,7 @@ If neither exists, startup fails.
 ## Config Overview
 
 Top-level sections:
+- `cwd = "..."` (optional daemon working directory; defaults to `$KIWI`)
 - `layout = "..."` (optional keyboard layout id/alias)
 - `[menubar]` (optional menubar status item settings)
 - `[mods]` (optional modifier aliases)
@@ -127,6 +128,7 @@ Top-level sections:
 Example:
 
 ```toml
+cwd = "$HOME"
 layout = "ABC"
 
 [menubar]
@@ -147,6 +149,14 @@ chrome = "Google Chrome"
 [app."Google Chrome"]
 "hyper+w" = "remap:cmd+w"
 ```
+
+### Working Directory
+
+Kiwi changes the daemon's working directory before initializing its runtime. Set it with the
+top-level `cwd` key. `$VAR` and `${VAR}` environment variables are expanded. `$KIWI` is a built-in
+alias that always resolves to `$HOME/.kiwi`; it does not read a `KIWI` environment variable.
+Relative paths are resolved from the directory containing the config file. Changes to `cwd`
+require a daemon restart.
 
 ## App Groups And Selectors
 
