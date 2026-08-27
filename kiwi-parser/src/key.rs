@@ -32,6 +32,8 @@ pub enum Key {
     Spotlight,
     Dictation,
     DoNotDisturb,
+    Power,
+    Accessibility,
 }
 
 impl Key {
@@ -70,6 +72,8 @@ impl Key {
             "spotlight" | "sl" | "sls" => Some(Self::Spotlight),
             "dictation" | "dict" | "dtn" => Some(Self::Dictation),
             "donotdisturb" | "dnd" => Some(Self::DoNotDisturb),
+            "power" | "lock" => Some(Self::Power),
+            "accessibility" | "accessibilityshortcut" | "a11y" => Some(Self::Accessibility),
             _ if s.starts_with('f') && s.len() > 1 => s[1..].parse::<u8>().ok().map(Self::F),
             _ if s.chars().count() == 1 => s.chars().next().map(Self::Char),
             _ => None,
@@ -93,13 +97,6 @@ impl Key {
                 | Self::Spotlight
                 | Self::Dictation
                 | Self::DoNotDisturb
-        )
-    }
-
-    pub fn is_non_interceptable_trigger_key(&self) -> bool {
-        matches!(
-            self,
-            Self::MissionControl | Self::Spotlight | Self::Dictation | Self::DoNotDisturb
         )
     }
 }
@@ -137,6 +134,8 @@ impl std::fmt::Display for Key {
             Self::Spotlight => write!(f, "spotlight"),
             Self::Dictation => write!(f, "dictation"),
             Self::DoNotDisturb => write!(f, "donotdisturb"),
+            Self::Power => write!(f, "power"),
+            Self::Accessibility => write!(f, "accessibility"),
         }
     }
 }

@@ -15,7 +15,10 @@ use crate::cli::LogArgs;
 use crate::cli::error::{CliError, CliResult};
 use crate::control::{ControlState, default_socket_path, spawn_control_server};
 use crate::event_tap::{CGEventTap, CGEventType};
-use crate::input::{USER_DATA, from_cg_code, from_system_defined_event, get_character_from_event};
+use crate::input::{
+    IncomingKeyEvent, USER_DATA, from_cg_code, from_system_defined_event,
+    get_character_from_event,
+};
 use crate::manager::RELOAD_REQUESTED;
 use crate::window::focused::init_focus_observer;
 use clap::Parser;
@@ -134,7 +137,7 @@ pub(crate) fn run_daemon(
             }
 
             let flags = event.get_flags();
-            let (key, is_down) = match type_ {
+            let incoming = match type_ {
                 CGEventType::KeyDown | CGEventType::KeyUp => {
                     let key_code =
                         event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
@@ -143,33 +146,63 @@ pub(crate) fn run_daemon(
                         Some(k) => k,
                         None => return CallbackResult::Keep,
                     };
-                    (key, matches!(type_, CGEventType::KeyDown))
+                    IncomingKeyEvent::Transition {
+                        key,
+                        is_down: matches!(type_, CGEventType::KeyDown),
+                    }
                 }
                 CGEventType::SystemDefined => match from_system_defined_event(event) {
-                    Some((key, is_down)) => (key, is_down),
+                    Some(event) => event,
                     None => return CallbackResult::Keep,
                 },
                 _ => return CallbackResult::Keep,
             };
 
-            let modifiers = input::modifiers_from_cg_flags(flags);
+            let key = match &incoming {
+                IncomingKeyEvent::Transition { key, .. } | IncomingKeyEvent::OneShot(key) => key,
+            };
+
+            let modifiers = input::modifiers_for_key(flags, key);
             let app_name = crate::window::get_focused_app();
 
-            match manager::intercept_decision(&key, modifiers, is_down) {
-                manager::InterceptDecision::ProcessNormally => {}
-                manager::InterceptDecision::KeepWithoutProcessing => {
-                    return CallbackResult::Keep;
+            let transitions: &[bool] = match &incoming {
+                IncomingKeyEvent::Transition { is_down, .. } => std::slice::from_ref(is_down),
+                IncomingKeyEvent::OneShot(_) => &[true, false],
+            };
+            let mut should_keep_without_processing = false;
+            let mut should_drop_without_processing = false;
+            for &is_down in transitions {
+                match manager::intercept_decision(key, modifiers, is_down) {
+                    manager::InterceptDecision::ProcessNormally => {}
+                    manager::InterceptDecision::KeepWithoutProcessing => {
+                        should_keep_without_processing = true;
+                    }
+                    manager::InterceptDecision::DropWithoutProcessing => {
+                        should_drop_without_processing = true;
+                    }
                 }
-                manager::InterceptDecision::DropWithoutProcessing => {
-                    return CallbackResult::Drop;
-                }
+            }
+            if should_drop_without_processing {
+                return CallbackResult::Drop;
+            }
+            if should_keep_without_processing {
+                return CallbackResult::Keep;
             }
 
             if let Ok(mut mgr) = manager_ref.lock() {
-                let result = mgr.process(key, modifiers, is_down, &app_name);
-                let handled = result.handled;
-                if let Some(action) = result.action {
-                    manager::dispatch_action(action);
+                let results = match incoming {
+                    IncomingKeyEvent::Transition { key, is_down } => {
+                        vec![mgr.process(key, modifiers, is_down, &app_name)]
+                    }
+                    IncomingKeyEvent::OneShot(key) => {
+                        Vec::from(mgr.process_one_shot(key, modifiers, &app_name))
+                    }
+                };
+                let handled = results.iter().any(|result| result.handled);
+                for result in results {
+                    if let Some(action) = result.action {
+                        manager::dispatch_action(action);
+                    }
                 }
 
                 if RELOAD_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {

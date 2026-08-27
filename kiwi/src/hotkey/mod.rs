@@ -427,6 +427,19 @@ impl HotkeyManager {
         ProcessResult::consume(None)
     }
 
+    /// Process a system event that represents a complete press rather than a
+    /// normal key-down/key-up pair.
+    pub fn process_one_shot(
+        &mut self,
+        key: Key,
+        modifiers: Modifiers,
+        current_app: &str,
+    ) -> [ProcessResult; 2] {
+        let down = self.process(key.clone(), modifiers, true, current_app);
+        let up = self.process(key, modifiers, false, current_app);
+        [down, up]
+    }
+
     pub fn registered_layer_names(&self) -> Vec<String> {
         let mut names: Vec<_> = self.layer_registry.keys().cloned().collect();
         names.sort();
@@ -685,6 +698,19 @@ mod tests {
 
         let second = mgr.process(Key::Char('b'), Modifiers::NONE, true, "");
         assert!(!second.handled);
+    }
+
+    #[test]
+    fn system_one_shot_completes_press_state() {
+        let mut mgr = HotkeyManager::new();
+        let power = HotkeyStep::new(Key::Power, Modifiers::NONE);
+        mgr.bind(vec![power.clone()], None, Action::Reload);
+
+        let [down, up] = mgr.process_one_shot(Key::Power, Modifiers::NONE, "");
+        assert!(matches!(down.action, Some(Action::Reload)));
+        assert!(up.handled);
+        assert!(!mgr.observed_downs.contains(&power));
+        assert!(!mgr.active_activations.contains(&power));
     }
 
     #[test]

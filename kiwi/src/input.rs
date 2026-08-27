@@ -20,6 +20,12 @@ use tracing::info;
 
 pub const USER_DATA: i64 = 0x6B697769; // "kiwi" in hexadecimal
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IncomingKeyEvent {
+    Transition { key: Key, is_down: bool },
+    OneShot(Key),
+}
+
 thread_local! {
     static EVENT_SOURCE: RefCell<Option<CGEventSource>> = const { RefCell::new(None) };
 }
@@ -41,6 +47,9 @@ unsafe extern "C" {
 }
 
 const CG_EVENT_SOURCE_USER_DATA_FIELD: u32 = 42;
+// Empirically observed on physical Mission Control/Spotlight function-row
+// events on macOS 26.6.2: SecondaryFn plus the 0x100 hardware event bit.
+const VIRTUAL_FUNCTION_ROW_FLAGS: u64 = 0x800100;
 
 pub fn modifiers_from_cg_flags(flags: CGEventFlags) -> Modifiers {
     let mut result = Modifiers::NONE;
@@ -60,6 +69,19 @@ pub fn modifiers_from_cg_flags(flags: CGEventFlags) -> Modifiers {
         result |= Modifiers::FUNCTION;
     }
     result
+}
+
+pub fn modifiers_for_key(flags: CGEventFlags, key: &Key) -> Modifiers {
+    let mut modifiers = modifiers_from_cg_flags(flags);
+    if matches!(
+        key,
+        Key::MissionControl | Key::Spotlight | Key::Dictation | Key::DoNotDisturb
+    ) {
+        // These physical controls carry SecondaryFn as a hardware artifact. Their
+        // logical binding is the special key alone, not fn+special-key.
+        modifiers.remove(Modifiers::FUNCTION);
+    }
+    modifiers
 }
 
 fn get_event_source() -> CGEventSource {
@@ -167,21 +189,70 @@ fn press_media_key(media_keycode: c_int, modifiers: Modifiers) {
     }
 }
 
-fn press_virtual_key(code: u16) {
+fn virtual_function_row_flags(modifiers: Modifiers) -> u64 {
+    VIRTUAL_FUNCTION_ROW_FLAGS | modifiers_to_cg_flags(modifiers).bits()
+}
+
+fn press_virtual_key(code: u16, modifiers: Modifiers) {
     unsafe {
         let down = CGEventCreateKeyboardEvent(std::ptr::null_mut(), code, true);
         let up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), code, false);
+        let flags = virtual_function_row_flags(modifiers);
 
         if !down.is_null() {
+            CGEventSetFlags(down, flags);
             CGEventSetIntegerValueField(down, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
             CGEventPost(0, down);
             CFRelease(down);
         }
         if !up.is_null() {
+            CGEventSetFlags(up, flags);
             CGEventSetIntegerValueField(up, CG_EVENT_SOURCE_USER_DATA_FIELD, USER_DATA);
             CGEventPost(0, up);
             CFRelease(up);
         }
+    }
+}
+
+fn press_one_shot_system_event(subtype: i16, modifiers: Modifiers) {
+    unsafe {
+        // Empirically derived from physical events captured on macOS 26.6.2
+        // with SIP enabled. Power and Accessibility are single type-14 events,
+        // not down/up pairs. Runtime behavior requires manual validation.
+        let event: *mut AnyObject = msg_send![
+            class!(NSEvent),
+            otherEventWithType: 14usize,
+            location: NSPoint::new(0.0, 0.0),
+            modifierFlags: modifiers_to_ns_flags(modifiers) as usize,
+            timestamp: 0.0f64,
+            windowNumber: 0i64,
+            context: std::ptr::null_mut::<AnyObject>(),
+            subtype: subtype,
+            data1: 0isize,
+            data2: 0isize
+        ];
+
+        if !event.is_null() {
+            let ns_event: &NSEvent = &*(event as *mut NSEvent);
+            if let Some(cg_event) = ns_event.CGEvent() {
+                let cg_event_ptr =
+                    objc2::rc::Retained::<Objc2CGEvent>::as_ptr(&cg_event) as *mut c_void;
+                CGEventSetIntegerValueField(
+                    cg_event_ptr,
+                    CG_EVENT_SOURCE_USER_DATA_FIELD,
+                    USER_DATA,
+                );
+                CGEventPost(0, cg_event_ptr);
+            }
+        }
+    }
+}
+
+fn one_shot_system_event_subtype(key: &Key) -> Option<i16> {
+    match key {
+        Key::Power => Some(16),
+        Key::Accessibility => Some(17),
+        _ => None,
     }
 }
 
@@ -199,7 +270,15 @@ pub fn send_key_combination(combo: &KeyBinding) {
     }
 
     if is_virtual_system_key(&combo.key) {
-        press_virtual_key(key_to_cg_keycode(&combo.key) as u16);
+        press_virtual_key(
+            key_to_cg_keycode(&combo.key) as u16,
+            combo.modifiers,
+        );
+        return;
+    }
+
+    if let Some(subtype) = one_shot_system_event_subtype(&combo.key) {
+        press_one_shot_system_event(subtype, combo.modifiers);
         return;
     }
 
@@ -277,9 +356,13 @@ pub fn click(point: CGPoint) {
 
 #[cfg(test)]
 mod tests {
-    use super::{modifiers_from_cg_flags, modifiers_to_cg_flags, modifiers_to_ns_flags};
+    use super::{
+        IncomingKeyEvent, VIRTUAL_FUNCTION_ROW_FLAGS, decode_system_defined_event, from_cg_code,
+        modifiers_for_key, modifiers_from_cg_flags, modifiers_to_cg_flags, modifiers_to_ns_flags,
+        one_shot_system_event_subtype, virtual_function_row_flags,
+    };
     use core_graphics::event::CGEventFlags;
-    use kiwi_parser::Modifiers;
+    use kiwi_parser::{Key, Modifiers};
 
     #[test]
     fn function_modifier_round_trips_with_cg_flags() {
@@ -293,6 +376,60 @@ mod tests {
     #[test]
     fn function_modifier_sets_ns_flag() {
         assert_ne!(modifiers_to_ns_flags(Modifiers::FUNCTION) & (1 << 23), 0);
+    }
+
+    #[test]
+    fn decodes_virtual_function_row_keycodes() {
+        assert_eq!(from_cg_code(160, None), Some(Key::MissionControl));
+        assert_eq!(from_cg_code(177, None), Some(Key::Spotlight));
+        assert_eq!(from_cg_code(176, None), Some(Key::Dictation));
+        assert_eq!(from_cg_code(178, None), Some(Key::DoNotDisturb));
+    }
+
+    #[test]
+    fn strips_hardware_fn_artifact_only_from_virtual_function_row_keys() {
+        let flags = CGEventFlags::CGEventFlagSecondaryFn | CGEventFlags::CGEventFlagCommand;
+        let special = modifiers_for_key(flags, &Key::Spotlight);
+        assert_eq!(special, Modifiers::COMMAND);
+
+        let ordinary = modifiers_for_key(flags, &Key::Char('a'));
+        assert!(ordinary.contains(Modifiers::FUNCTION));
+        assert!(ordinary.contains(Modifiers::COMMAND));
+    }
+
+    #[test]
+    fn decodes_exact_power_and_accessibility_payloads_as_one_shots() {
+        assert_eq!(
+            decode_system_defined_event(16, 0, 0),
+            Some(IncomingKeyEvent::OneShot(Key::Power))
+        );
+        assert_eq!(
+            decode_system_defined_event(17, 0, 0),
+            Some(IncomingKeyEvent::OneShot(Key::Accessibility))
+        );
+
+        assert_eq!(decode_system_defined_event(16, 1, 0), None);
+        assert_eq!(decode_system_defined_event(16, 0, 1), None);
+        assert_eq!(decode_system_defined_event(17, 1, 0), None);
+        assert_eq!(decode_system_defined_event(17, 0, 1), None);
+    }
+
+    #[test]
+    fn maps_one_shot_system_event_synthesis_subtypes() {
+        assert_eq!(one_shot_system_event_subtype(&Key::Power), Some(16));
+        assert_eq!(
+            one_shot_system_event_subtype(&Key::Accessibility),
+            Some(17)
+        );
+        assert_eq!(one_shot_system_event_subtype(&Key::Spotlight), None);
+    }
+
+    #[test]
+    fn virtual_function_row_synthesis_combines_physical_and_requested_flags() {
+        let flags = virtual_function_row_flags(Modifiers::COMMAND | Modifiers::OPTION);
+        assert_eq!(flags & VIRTUAL_FUNCTION_ROW_FLAGS, VIRTUAL_FUNCTION_ROW_FLAGS);
+        assert_ne!(flags & CGEventFlags::CGEventFlagCommand.bits(), 0);
+        assert_ne!(flags & CGEventFlags::CGEventFlagAlternate.bits(), 0);
     }
 }
 
@@ -382,6 +519,7 @@ pub fn key_to_cg_keycode(key: &Key) -> CGKeyCode {
         Key::Spotlight => 177,
         Key::Dictation => 176,
         Key::DoNotDisturb => 178,
+        Key::Power | Key::Accessibility => 0,
         _ => 0,
     }
 }
@@ -427,6 +565,11 @@ pub fn from_cg_code(code: u16, char: Option<char>) -> Option<Key> {
         0x49 => Some(Key::VolumeDown),
         0x4A => Some(Key::Mute),
 
+        160 => Some(Key::MissionControl),
+        177 => Some(Key::Spotlight),
+        176 => Some(Key::Dictation),
+        178 => Some(Key::DoNotDisturb),
+
         _ => {
             if let Some(c) = crate::translate::keycode_to_base_char(code as CGKeyCode) {
                 Some(Key::Char(c))
@@ -469,20 +612,33 @@ pub fn get_character_from_event(event: &CGEvent) -> Option<char> {
     }
 }
 
-pub fn from_system_defined_event(event: &CGEvent) -> Option<(Key, bool)> {
+pub fn from_system_defined_event(event: &CGEvent) -> Option<IncomingKeyEvent> {
     let cg_event: &Objc2CGEvent = unsafe { &*(event.as_ptr() as *const Objc2CGEvent) };
     let ns_event = match NSEvent::eventWithCGEvent(cg_event) {
         Some(event) => event,
         None => return None,
     };
 
-    // Subtype 8 is for aux control buttons / media keys.
     let subtype = ns_event.subtype().0;
+    let data1 = ns_event.data1() as i64;
+    let data2 = ns_event.data2() as i64;
+    decode_system_defined_event(subtype, data1, data2)
+}
+
+fn decode_system_defined_event(subtype: i16, data1: i64, data2: i64) -> Option<IncomingKeyEvent> {
+    // Empirically observed on macOS 26.6.2 with SIP enabled. Match the full
+    // payload so unrelated subtype 16/17 system events remain untouched.
+    match (subtype, data1, data2) {
+        (16, 0, 0) => return Some(IncomingKeyEvent::OneShot(Key::Power)),
+        (17, 0, 0) => return Some(IncomingKeyEvent::OneShot(Key::Accessibility)),
+        _ => {}
+    }
+
+    // Subtype 8 is for aux control buttons / media keys.
     if subtype != 8 {
         return None;
     }
 
-    let data1 = ns_event.data1() as i64;
     let key_type = ((data1 >> 16) & 0xFFFF) as i32;
     let key_state = (data1 & 0xFF00) as i32;
     let is_down = match key_state {
@@ -505,5 +661,5 @@ pub fn from_system_defined_event(event: &CGEvent) -> Option<(Key, bool)> {
         _ => return None,
     };
 
-    Some((key, is_down))
+    Some(IncomingKeyEvent::Transition { key, is_down })
 }

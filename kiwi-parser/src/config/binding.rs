@@ -31,7 +31,7 @@ fn parse_keybinding_inner(
     span: SourceSpan,
     errors: &mut Vec<ConfigError>,
     ctx: &ValidationContext,
-    allow_media_key: bool,
+    is_remap_target: bool,
 ) -> Option<KeyBinding> {
     // let mode = if raw_key.starts_with('@') {
     //     KeyBindingMode::Logical
@@ -130,12 +130,15 @@ fn parse_keybinding_inner(
     // 4. Construction
     match resolved_key {
         Some(key) => {
-            if !allow_media_key && key.is_non_interceptable_trigger_key() {
+            if is_remap_target
+                && key.is_media_key()
+                && resolved_mods.contains(Modifiers::FUNCTION)
+            {
                 errors.push(ConfigError::InvalidBinding {
                     src: ctx.src.clone(),
                     raw: raw_key.to_string(),
                     span,
-                    message: "This key is not interceptable as a trigger binding (allowed only as remap target)".into(),
+                    message: "Function-row remap targets do not support the fn modifier".into(),
                 });
                 return None;
             }
@@ -180,20 +183,29 @@ mod tests {
     }
 
     #[test]
-    fn trigger_binding_rejects_non_interceptable_special_keys() {
+    fn trigger_binding_allows_interceptable_special_keys() {
         let src = NamedSource::new("test.toml", "".to_string());
         let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
         let context = ctx(&src, &modifier_map);
         let mut errors = Vec::new();
 
-        let parsed = parse_keybinding(
+        for raw in [
             "missioncontrol",
-            SourceSpan::new(0.into(), 14),
-            &mut errors,
-            &context,
-        );
-        assert!(parsed.is_none());
-        assert!(!errors.is_empty());
+            "spotlight",
+            "dictation",
+            "donotdisturb",
+            "power",
+            "accessibility",
+        ] {
+            let parsed = parse_keybinding(
+                raw,
+                SourceSpan::new(0.into(), raw.len()),
+                &mut errors,
+                &context,
+            );
+            assert!(parsed.is_some(), "{raw} should parse as a trigger");
+        }
+        assert!(errors.is_empty());
     }
 
     #[test]
@@ -234,6 +246,64 @@ mod tests {
         assert!(parsed.modifiers.contains(Modifiers::COMMAND));
         assert!(parsed.modifiers.contains(Modifiers::SHIFT));
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn remap_binding_allows_one_shot_system_events() {
+        let src = NamedSource::new("test.toml", "".to_string());
+        let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+        let context = ctx(&src, &modifier_map);
+
+        for raw in ["power", "accessibility"] {
+            let mut errors = Vec::new();
+            let parsed = parse_remap_keybinding(
+                raw,
+                SourceSpan::new(0.into(), raw.len()),
+                &mut errors,
+                &context,
+            );
+            assert!(parsed.is_some());
+            assert!(errors.is_empty());
+        }
+    }
+
+    #[test]
+    fn remap_binding_rejects_fn_for_function_row_keys() {
+        let src = NamedSource::new("test.toml", "".to_string());
+        let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+        let context = ctx(&src, &modifier_map);
+
+        for raw in ["fn+missioncontrol", "fn+volumeup"] {
+            let mut errors = Vec::new();
+            let parsed = parse_remap_keybinding(
+                raw,
+                SourceSpan::new(0.into(), raw.len()),
+                &mut errors,
+                &context,
+            );
+            assert!(parsed.is_none());
+            assert_eq!(errors.len(), 1);
+        }
+    }
+
+    #[test]
+    fn remap_binding_allows_fn_for_power_and_accessibility() {
+        let src = NamedSource::new("test.toml", "".to_string());
+        let modifier_map: HashMap<Modifiers, (String, SourceSpan)> = HashMap::new();
+        let context = ctx(&src, &modifier_map);
+
+        for raw in ["fn+power", "fn+accessibility"] {
+            let mut errors = Vec::new();
+            let parsed = parse_remap_keybinding(
+                raw,
+                SourceSpan::new(0.into(), raw.len()),
+                &mut errors,
+                &context,
+            )
+            .expect("one-shot system event should accept fn");
+            assert!(parsed.modifiers.contains(Modifiers::FUNCTION));
+            assert!(errors.is_empty());
+        }
     }
 
     #[test]
