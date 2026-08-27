@@ -75,10 +75,17 @@ pub fn modifiers_for_key(flags: CGEventFlags, key: &Key) -> Modifiers {
     let mut modifiers = modifiers_from_cg_flags(flags);
     if matches!(
         key,
-        Key::MissionControl | Key::Spotlight | Key::Dictation | Key::DoNotDisturb
+        Key::MissionControl
+            | Key::Spotlight
+            | Key::Dictation
+            | Key::DoNotDisturb
+            | Key::ArrowUp
+            | Key::ArrowDown
+            | Key::ArrowLeft
+            | Key::ArrowRight
     ) {
         // These physical controls carry SecondaryFn as a hardware artifact. Their
-        // logical binding is the special key alone, not fn+special-key.
+        // logical binding is the key alone, not fn+key.
         modifiers.remove(Modifiers::FUNCTION);
     }
     modifiers
@@ -387,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn strips_hardware_fn_artifact_only_from_virtual_function_row_keys() {
+    fn strips_hardware_fn_artifact_from_virtual_function_row_keys() {
         let flags = CGEventFlags::CGEventFlagSecondaryFn | CGEventFlags::CGEventFlagCommand;
         let special = modifiers_for_key(flags, &Key::Spotlight);
         assert_eq!(special, Modifiers::COMMAND);
@@ -395,6 +402,20 @@ mod tests {
         let ordinary = modifiers_for_key(flags, &Key::Char('a'));
         assert!(ordinary.contains(Modifiers::FUNCTION));
         assert!(ordinary.contains(Modifiers::COMMAND));
+    }
+
+    #[test]
+    fn strips_hardware_fn_artifact_from_arrow_keys() {
+        let flags = CGEventFlags::CGEventFlagSecondaryFn | CGEventFlags::CGEventFlagShift;
+
+        for key in [
+            Key::ArrowUp,
+            Key::ArrowDown,
+            Key::ArrowLeft,
+            Key::ArrowRight,
+        ] {
+            assert_eq!(modifiers_for_key(flags, &key), Modifiers::SHIFT);
+        }
     }
 
     #[test]
