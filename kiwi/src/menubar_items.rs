@@ -1,16 +1,18 @@
 use crate::ffi::{
-    AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication,
-    AXUIElementPerformAction, AXUIElementSetAttributeValue,
+    AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementPerformAction,
+    AXUIElementSetAttributeValue,
 };
-use kiwi_parser::MenubarAction;
 use core_foundation::base::CFTypeRef;
 use core_foundation::string::CFStringRef;
+use kiwi_parser::MenubarAction;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
 use objc2_foundation::{NSArray, NSString};
-use std::time::Duration;
+use std::collections::HashMap;
 use std::ffi::c_void;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
@@ -69,9 +71,13 @@ struct MenuPathCandidate {
 
 #[derive(Debug)]
 struct MenuEntry {
-    element: AxElement,
     candidate: MenuPathCandidate,
-    enabled: bool,
+}
+
+static MENU_PATH_CACHE: OnceLock<Mutex<HashMap<i32, Vec<MenuPathCandidate>>>> = OnceLock::new();
+
+fn menu_path_cache() -> &'static Mutex<HashMap<i32, Vec<MenuPathCandidate>>> {
+    MENU_PATH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn display_path(path: &[String]) -> String {
@@ -83,7 +89,9 @@ fn normalize_component(component: &str) -> String {
 }
 
 fn normalize_path(path: &[String]) -> Vec<String> {
-    path.iter().map(|component| normalize_component(component)).collect()
+    path.iter()
+        .map(|component| normalize_component(component))
+        .collect()
 }
 
 fn path_matches_suffix(candidate: &[String], target: &[String]) -> bool {
@@ -117,10 +125,7 @@ fn match_menu_candidates(
         .collect();
 
     match hits.as_slice() {
-        [] => Err(format!(
-            "no menu item matches '{}'",
-            display_path(target)
-        )),
+        [] => Err(format!("no menu item matches '{}'", display_path(target))),
         [idx] => Ok(*idx),
         _ => {
             let mut paths: Vec<String> = hits
@@ -230,7 +235,8 @@ fn menu_bar(app: &NSRunningApplication) -> Option<AxElement> {
         let menu_bar_attr = &NSString::from_str("AXMenuBar");
         let menu_bar_attr_cf = menu_bar_attr.as_ref() as *const NSString as CFStringRef;
         let mut menu_bar_val: CFTypeRef = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(ax_app.as_ptr(), menu_bar_attr_cf, &mut menu_bar_val);
+        let err =
+            AXUIElementCopyAttributeValue(ax_app.as_ptr(), menu_bar_attr_cf, &mut menu_bar_val);
         if err == K_AX_ERROR_SUCCESS && !menu_bar_val.is_null() {
             Some(AxElement::new(menu_bar_val as AXUIElementRef))
         } else {
@@ -263,17 +269,13 @@ fn collect_menu_entries(
     let has_submenu = children
         .iter()
         .any(|child| ax_role(child).as_deref() == Some("AXMenu"));
-    let enabled = ax_is_enabled(element);
-
     let mut results = Vec::new();
     if !title.is_empty() {
         results.push(MenuEntry {
-            element: element.clone(),
             candidate: MenuPathCandidate {
                 path: crumb.clone(),
                 has_submenu,
             },
-            enabled,
         });
     }
 
@@ -281,6 +283,43 @@ fn collect_menu_entries(
         results.extend(collect_menu_entries(child, &crumb, depth + 1));
     }
 
+    results
+}
+
+fn collect_menu_candidates(
+    element: &AxElement,
+    breadcrumb: &[String],
+    depth: usize,
+) -> Vec<MenuPathCandidate> {
+    if depth >= 8 {
+        return Vec::new();
+    }
+
+    let role = ax_role(element).unwrap_or_default();
+    if role == "AXSeparator" {
+        return Vec::new();
+    }
+
+    let title = ax_title(element).unwrap_or_default();
+    let mut crumb = breadcrumb.to_vec();
+    if !title.is_empty() {
+        crumb.push(title);
+    }
+
+    let children = ax_children(element);
+    let has_submenu = children
+        .iter()
+        .any(|child| ax_role(child).as_deref() == Some("AXMenu"));
+    let mut results = Vec::new();
+    if !crumb.is_empty() && crumb.len() > breadcrumb.len() {
+        results.push(MenuPathCandidate {
+            path: crumb.clone(),
+            has_submenu,
+        });
+    }
+    for child in &children {
+        results.extend(collect_menu_candidates(child, &crumb, depth + 1));
+    }
     results
 }
 
@@ -296,7 +335,9 @@ fn find_menu_component(element: &AxElement, target_name: &str) -> Option<AxEleme
         let child_role = ax_role(child).unwrap_or_default();
         let child_title = ax_title(child).unwrap_or_default();
 
-        if !child_title.is_empty() && normalize_component(&child_title) == normalize_component(target_name) {
+        if !child_title.is_empty()
+            && normalize_component(&child_title) == normalize_component(target_name)
+        {
             return Some(child.clone());
         }
 
@@ -321,13 +362,53 @@ fn press(element: &AxElement) -> Result<(), String> {
     }
 }
 
+fn click_path(app_name: &str, menu_bar: &AxElement, path: &[String]) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("menu path cannot be empty".into());
+    }
+
+    let mut current = menu_bar.clone();
+    for (index, component) in path.iter().enumerate() {
+        let found = find_menu_component(&current, component).ok_or_else(|| {
+            format!(
+                "menu component '{}' not found while clicking '{}' in '{app_name}'",
+                component,
+                display_path(path)
+            )
+        })?;
+        let is_last = index + 1 == path.len();
+        if is_last {
+            if !ax_is_enabled(&found) {
+                return Err(format!(
+                    "menu item '{}' is disabled in '{app_name}'",
+                    display_path(path)
+                ));
+            }
+            return press(&found).map_err(|e| {
+                format!(
+                    "failed to click menu item '{}' in '{app_name}': {e}",
+                    display_path(path)
+                )
+            });
+        }
+
+        // AX exposes submenu descendants without opening their parent. Keep walking
+        // the accessibility tree and press only the final item so `menubar:click`
+        // does not visibly open the menu hierarchy.
+        current = found;
+    }
+    unreachable!()
+}
+
 fn focus_app(app: &NSRunningApplication) {
     let options = NSApplicationActivationOptions::ActivateAllWindows;
     let _ = app.activateWithOptions(options);
     std::thread::sleep(Duration::from_millis(300));
 }
 
-fn resolve_target_app(app_name: Option<&str>) -> Result<(Retained<NSRunningApplication>, String), String> {
+fn resolve_target_app(
+    app_name: Option<&str>,
+) -> Result<(Retained<NSRunningApplication>, String), String> {
     let workspace = NSWorkspace::sharedWorkspace();
     match app_name {
         Some(target_name) => {
@@ -371,26 +452,10 @@ fn resolve_menu_entries(app: &NSRunningApplication) -> Result<(AxElement, Vec<Me
 }
 
 fn menu_paths(entries: &[MenuEntry]) -> Vec<MenuPathCandidate> {
-    entries.iter().map(|entry| entry.candidate.clone()).collect()
-}
-
-fn click_entry(app_name: &str, entries: &[MenuEntry], item: &[String]) -> Result<(), String> {
-    let candidates = menu_paths(entries);
-    let idx = match_menu_candidates(&candidates, item, true)
-        .map_err(|e| format!("{e} in '{app_name}'"))?;
-    let entry = &entries[idx];
-    if !entry.enabled {
-        return Err(format!(
-            "menu item '{}' is disabled in '{app_name}'",
-            display_path(&entry.candidate.path)
-        ));
-    }
-    press(&entry.element).map_err(|e| {
-        format!(
-            "failed to click menu item '{}' in '{app_name}': {e}",
-            display_path(&entry.candidate.path)
-        )
-    })
+    entries
+        .iter()
+        .map(|entry| entry.candidate.clone())
+        .collect()
 }
 
 fn highlight_leaf(found: &AxElement) -> Result<(), String> {
@@ -402,10 +467,8 @@ fn highlight_leaf(found: &AxElement) -> Result<(), String> {
         return Ok(());
     }
 
-    let retained_found =
-        unsafe { Retained::retain(found.as_ptr() as *mut AnyObject) }.ok_or_else(|| {
-            "failed to retain menu item for highlight".to_string()
-        })?;
+    let retained_found = unsafe { Retained::retain(found.as_ptr() as *mut AnyObject) }
+        .ok_or_else(|| "failed to retain menu item for highlight".to_string())?;
     let arr = NSArray::arrayWithObject(&*retained_found);
     let arr_cf = &*arr as *const _ as CFTypeRef;
     let sel_attr = &NSString::from_str("AXSelectedChildren");
@@ -477,9 +540,54 @@ fn show_entry(
 
 pub fn click(action: &MenubarAction) -> Result<(), String> {
     let (app, app_name) = resolve_target_app(action.app.as_deref())?;
-    focus_app(&app);
-    let (_, entries) = resolve_menu_entries(&app)?;
-    click_entry(&app_name, &entries, &action.item)
+    // focus_app(&app);
+    let menu_bar =
+        menu_bar(&app).ok_or_else(|| format!("could not read menu bar for '{app_name}'"))?;
+
+    // A complete path can be followed directly without enumerating the menu tree.
+    // Besides being the common configured form, this also keeps enabled state fresh.
+    if action.item.len() > 1 {
+        match click_path(&app_name, &menu_bar, &action.item) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.contains("not found while clicking") => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    let pid = app.processIdentifier();
+    for refresh in [false, true] {
+        let candidates = if refresh {
+            let paths = collect_menu_candidates(&menu_bar, &[], 0);
+            menu_path_cache().lock().unwrap().insert(pid, paths.clone());
+            paths
+        } else {
+            menu_path_cache()
+                .lock()
+                .unwrap()
+                .get(&pid)
+                .cloned()
+                .unwrap_or_default()
+        };
+
+        if candidates.is_empty() {
+            continue;
+        }
+        if let Ok(index) = match_menu_candidates(&candidates, &action.item, true)
+            && click_path(&app_name, &menu_bar, &candidates[index].path).is_ok()
+        {
+            return Ok(());
+        }
+    }
+
+    let candidates = menu_path_cache()
+        .lock()
+        .unwrap()
+        .get(&pid)
+        .cloned()
+        .unwrap_or_default();
+    let index = match_menu_candidates(&candidates, &action.item, true)
+        .map_err(|e| format!("{e} in '{app_name}'"))?;
+    click_path(&app_name, &menu_bar, &candidates[index].path)
 }
 
 pub fn show(action: &MenubarAction) -> Result<(), String> {
@@ -491,7 +599,7 @@ pub fn show(action: &MenubarAction) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{match_menu_candidates, MenuPathCandidate};
+    use super::{MenuPathCandidate, match_menu_candidates};
 
     fn candidate(path: &[&str], has_submenu: bool) -> MenuPathCandidate {
         MenuPathCandidate {
@@ -520,8 +628,7 @@ mod tests {
             candidate(&["Edit", "Copy"], false),
         ];
 
-        let idx = match_menu_candidates(&candidates, &["Copy".into()], true)
-            .expect("should match");
+        let idx = match_menu_candidates(&candidates, &["Copy".into()], true).expect("should match");
         assert_eq!(idx, 1);
     }
 
